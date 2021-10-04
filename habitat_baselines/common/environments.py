@@ -23,6 +23,8 @@ from habitat.core.spaces import ActionSpace
 from gym import spaces
 from habitat_baselines.common.baseline_registry import baseline_registry
 import magnum as mn
+import quaternion as qt
+from habitat_sim.physics import JointMotorSettings
 
 
 def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
@@ -45,8 +47,8 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.num_joints = config.TASK_CONFIG.TASK.ACTION.NUM_JOINTS
         self.action_space = ActionSpace({
             "joint_targets": spaces.Box(
-                low=np.ones(self.num_joints) * np.deg2rad(-180),
-                high=np.ones(self.num_joints) * np.deg2rad(180),
+                low=np.ones(self.num_joints) * np.deg2rad(-1),
+                high=np.ones(self.num_joints) * np.deg2rad(1),
                 dtype=np.float32,
             )}
         )
@@ -61,7 +63,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         # Load the robot into the sim
         ao_mgr = self._sim.get_articulated_object_manager()
         self.robot_id = ao_mgr.add_articulated_object_from_urdf(
-            self.sim_config.ROBOT_URDF, fixed_base=False
+            self.sim_config.ROBOT_URDF, fixed_base=True
         )
 
         # Load the floor
@@ -77,24 +79,59 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         # Initialize attributes
         self.viz_buffer = []
-        self.steps = 0
+        self.episode_steps = 0
         self.render_episode = False
+        self.last_joint_pos = self.robot_id.joint_positions
+        self.sim_hz = self.sim_config.SIM_HZ
+        self.ctrl_hz = self.sim_config.CTRL_HZ
+        self.jmsIdxToJoint = {0: "FL_hip", 1: "FL_thigh", 2: "FL_calf", 3: "FR_hip", 4: "FR_thigh", 5: "FR_calf", 6: "RL_hip", 7: "RL_thigh", 8: "RL_calf", 9: "RR_hip", 10: "RR_thigh", 11: "RR_calf"}
         # super().__init__(self._core_env_config, dataset)
 
     def _reset_robot(self):
+        # target_pos = np.zeros(self.num_joints)
+        
+        # self.jms_list = [
+        #     JointMotorSettings(
+        #         pos,  # position_target
+        #         0.09,  # position_gain
+        #         0.0,  # velocity_target
+        #         0.5,  # velocity_gain
+        #         0.01,  # max_impulse
+        #     )
+        #     for pos in target_pos
+        # ]
+        
+        # self.robot_id.create_all_motors(self.jms_list[0])
+        # self._set_joint_type_pos("thigh", 0.9)
+        # self._set_joint_type_pos("calf", -1.9)
+        # self.robot_id.update_joint_motor(11, testJms)
+
         # Roll robot 90 deg
         base_transform = mn.Matrix4.rotation(
             mn.Rad(np.deg2rad(-90)), mn.Vector3(1.0, 0.0, 0.0)
         )
         # Position above center of platform
-        base_transform.translation = mn.Vector3(0.0, 0.5, 0.0)
+        base_transform.translation = mn.Vector3(0.0, 0.7, 0.0)
         self.robot_id.transformation = base_transform
-        pose = self.robot_id.joint_positions
+
+        print("setting lay!!!")
         calfDofs = [2, 5, 8, 11]
         for dof in calfDofs:
-            pose[dof] = np.deg2rad(-75)  # second joint
-            pose[dof - 1] = np.deg2rad(45)  # first joint
-        self.robot_id.joint_positions = pose
+            self.robot_id.joint_positions[dof] = -2.3 #second joint
+            self.robot_id.joint_positions[dof - 1] = 1.3 #first joint
+
+    
+    def _set_joint_type_pos(self, joint_type, joint_pos):
+        for idx, joint_name in self.jmsIdxToJoint.items():
+            jms = JointMotorSettings(
+                joint_pos,  # position_target
+                0.09,  # position_gain
+                0.0,  # velocity_target
+                0.5,  # velocity_gain
+                0.1,  # max_impulse
+            )
+            if joint_type in joint_name:
+                self.robot_id.update_joint_motor(idx, jms)
 
     def _place_agent(self):
         # place our agent in the scene
@@ -126,36 +163,61 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return habitat_sim.Configuration(backend_cfg, [agent_cfg])
 
-    def _simulate(self, steps=1, get_frames=False):
+    def _simulate(self, steps=1, render=False):
         # simulate dt seconds at 60Hz to the nearest fixed timestep
         observations = []
         for _ in range(steps):
-            self._sim.step_physics(1.0 / 60.0)
-            if get_frames:
-                observations.append(self._sim.get_sensor_observations())
+            self._sim.step_physics(1.0 / self.ctrl_hz)
+            vis = {}
+            if render:
+                vis = self._sim.get_sensor_observations()
+            obs = self._read_sensors() #NOTE: It's important that this is run every time step physics is run so that the join velocity stays correct
+            obs.update(vis)
+            observations.append(obs)
 
         return observations
+    
+    def _set_jms_pos(self, joint_pos):
+        for new_pos, jms in zip(joint_pos, self.jms_list):
+            jms.position_target += new_pos
+        
+        for idx, jms in enumerate(self.jms_list):
+            self.robot_id.update_joint_motor(idx, jms)
+
+    def _read_sensors(self):
+        obs = {}
+        obs["joint_pos"] = np.array(self.robot_id.joint_positions)
+        obs["joint_vel"] = (np.array(self.robot_id.joint_positions) - np.array(self.last_joint_pos)) / (1 / self.sim_hz)
+        self.last_joint_pos = self.robot_id.joint_positions
+        return obs
 
     def reset(self, render_episode=False):
         self.render_episode = render_episode
         self._reset_robot()
 
         # Let the robot fall to the ground
-        self._simulate(steps=60, get_frames=render_episode)
-        self.viz_buffer = []
-        self.steps = 0
+        obs = self._simulate(steps=60, render=render_episode)
+        self.viz_buffer = obs
+        self.episode_steps = 0
 
         observations = None
 
         return observations
 
     def step(self, *args, **kwargs):
-        self.steps += 1
-        # TODO: set motor values here
-        observations = self._simulate(steps=1, get_frames=self.render_episode)
-        self.viz_buffer += observations
+        self.episode_steps += 1
+        # self._set_jms_pos(args[0]["action_args"]) #NOTE: this seems a bit weird
+        #NOTE: SIM_HZ/CTRL_HZ allows us to update motors at correct freq.
+        assert int(self.sim_hz/self.ctrl_hz) == self.sim_hz/self.ctrl_hz, "sim_hz should be divis by ctrl_hz for simplicity"
+        obs = self._simulate(steps=int(self.sim_hz/self.ctrl_hz), render=self.render_episode)[-1] 
 
-        done = self.steps == 1000
+
+        # print("joint pos: ", obs["joint_pos"])
+        # print("joint vel: ", obs["joint_vel"])
+        # print("-"*100)
+        self.viz_buffer.append(obs)
+
+        done = self.episode_steps >= 0
         if done and self.render_episode:
             vut.make_video(
                 self.viz_buffer,
@@ -164,10 +226,11 @@ class LocomotionRLEnv(habitat.RLEnv):
                 "vid.mp4",
                 open_vid=False,
             )
+        # print(self.robot_id.joint_positions)
 
         info = {}
         reward = 0
-        return observations, reward, done, info
+        return obs, reward, done, info
         # return super().step(*args, **kwargs)
 
 

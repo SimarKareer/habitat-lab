@@ -1,7 +1,7 @@
 VERBOSE: False
 BASE_TASK_CONFIG_PATH: "configs/tasks/locomotion_stand.yaml"
 TRAINER_NAME: "ddppo"
-ENV_NAME: "NavRLEnv"
+ENV_NAME: "LocomotionRLEnv"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
 VIDEO_OPTION: []
@@ -24,8 +24,8 @@ RL:
   SUCCESS_REWARD: 2.5
 
   POLICY:
-    name: "PointNavResNetPolicy"
-
+    name: "LocomotionBaselinePolicy"
+    action_distribution_type: "gaussian"
   PPO:
     # ppo params
     clip_param: 0.2

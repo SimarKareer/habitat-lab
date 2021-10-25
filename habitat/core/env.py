@@ -89,12 +89,13 @@ class Env:
             for k, v in config.ENVIRONMENT.ITERATOR_OPTIONS.items()
         }
         iter_option_dict["seed"] = config.SEED
-        self._episode_iterator = self._dataset.get_episode_iterator(
-            **iter_option_dict
-        )
+        
 
         # load the first scene if dataset is present
         if self._dataset:
+            self._episode_iterator = self._dataset.get_episode_iterator(
+                **iter_option_dict
+            )
             assert (
                 len(self._dataset.episodes) > 0
             ), "dataset should have non-empty episodes list"
@@ -105,16 +106,18 @@ class Env:
             self.number_of_episodes = len(self._dataset.episodes)
         else:
             self.number_of_episodes = None
-
+        [print(1) for _ in range(30)]
         self._sim = make_sim(
             id_sim=self._config.SIMULATOR.TYPE, config=self._config.SIMULATOR
         )
+        [print(2) for _ in range(30)]
         self._task = make_task(
             self._config.TASK.TYPE,
             config=self._config.TASK,
             sim=self._sim,
             dataset=self._dataset,
         )
+        [print(3) for _ in range(30)]
         self.observation_space = spaces.Dict(
             {
                 **self._sim.sensor_suite.observation_spaces.spaces,

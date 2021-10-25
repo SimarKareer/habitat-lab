@@ -4,6 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import abc
+from habitat_baselines.rl.ppo import policy
 
 import torch
 from gym import spaces
@@ -29,9 +30,11 @@ class Policy(nn.Module, metaclass=abc.ABCMeta):
         self.net = net
         self.dim_actions = dim_actions
 
+        print("policy_config: ", policy_config)
         if policy_config is None:
             self.action_distribution_type = "categorical"
         else:
+            print("POLICY_CONFIG_ACTIONDIST", policy_config.action_distribution_type)
             self.action_distribution_type = (
                 policy_config.action_distribution_type
             )
@@ -148,6 +151,37 @@ class PointNavBaselinePolicy(Policy):
             hidden_size=config.RL.PPO.hidden_size,
         )
 
+@baseline_registry.register_policy
+class LocomotionBaselinePolicy(Policy):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        action_space,
+        hidden_size: int = 512,
+        policy_config = None,
+        **kwargs,
+    ):
+        super().__init__(
+            LocomotionBaselineNet(  # type: ignore
+                observation_space=observation_space,
+                hidden_size=hidden_size,
+                **kwargs,
+            ),
+            12, #TODO: fix
+            policy_config=policy_config
+        )
+
+    @classmethod
+    def from_config(
+        cls, config: Config, observation_space: spaces.Dict, action_space
+    ):
+        return cls(
+            observation_space=observation_space,
+            action_space=action_space,
+            hidden_size=config.RL.PPO.hidden_size,
+            policy_config=config.RL.POLICY
+        )
+
 
 class Net(nn.Module, metaclass=abc.ABCMeta):
     @abc.abstractmethod
@@ -244,6 +278,78 @@ class PointNavBaselineNet(Net):
             x = [perception_embed] + x
 
         x_out = torch.cat(x, dim=1)
+        x_out, rnn_hidden_states = self.state_encoder(
+            x_out, rnn_hidden_states, masks
+        )
+
+        return x_out, rnn_hidden_states
+
+
+class LocomotionBaselineNet(Net):
+    r"""Network which passes the input image through CNN if provided and concatenates
+    goal vector with CNN's output and passes that through RNN.
+
+    NOTE: for simplicity I'm assuming that observation_space is not a nested dict.
+    """
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        hidden_size: int,
+    ):
+        super().__init__()
+
+        self.non_visual_size = 0
+        for key in observation_space.spaces:
+            if key not in ["rgba_camera"]: #TODO fix this
+                self.non_visual_size += observation_space.spaces[key].shape[0]
+
+        self._hidden_size = hidden_size
+
+        # self.visual_encoder = SimpleCNN(observation_space, hidden_size)
+
+        self.state_encoder = build_rnn_state_encoder(
+            (0 if self.is_blind else self._hidden_size) + self.non_visual_size,
+            self._hidden_size,
+        )
+
+        self.train()
+
+    @property
+    def output_size(self):
+        return self._hidden_size
+
+    @property
+    def is_blind(self):
+        return True #NOTE: need to change if we add back CNN
+
+    @property
+    def num_recurrent_layers(self):
+        return self.state_encoder.num_recurrent_layers
+
+    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
+        # if IntegratedPointGoalGPSAndCompassSensor.cls_uuid in observations:
+        #     target_encoding = observations[
+        #         IntegratedPointGoalGPSAndCompassSensor.cls_uuid
+        #     ]
+
+        # elif PointGoalSensor.cls_uuid in observations:
+        #     target_encoding = observations[PointGoalSensor.cls_uuid]
+        # elif ImageGoalSensor.cls_uuid in observations:
+        #     image_goal = observations[ImageGoalSensor.cls_uuid]
+        #     target_encoding = self.goal_visual_encoder({"rgb": image_goal})
+
+        # x = [target_encoding]
+
+        # if not self.is_blind:
+        #     perception_embed = self.visual_encoder(observations)
+        #     x = [perception_embed] + x
+
+        x = [observations["joint_pos"], observations["joint_vel"], observations["euler_rot"]]
+        x_out = torch.cat(x, dim=1)
+
+
+        # x_out = observations[]
         x_out, rnn_hidden_states = self.state_encoder(
             x_out, rnn_hidden_states, masks
         )

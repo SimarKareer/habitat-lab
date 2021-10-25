@@ -5,13 +5,20 @@ SIMULATOR:
   CTRL_HZ: 30
   SIM_HZ: 120
   SETTLE_TIME: 20
+DEBUG:
+  FIXED_BASE: True
+  VIDEO_FREQ: 1000 #None if you don't want any videos
+  RENDER_OVERRIDE: False
 
 TASK:
   ACTION:
     NUM_JOINTS: 12
+    MAX_DEGREE_DELTA: 2 #in degrees
   START:
     CALF: -2.5
     THIGH: 1.3
   REWARD:
-    TIP_PENALTY: 10
-  
+    TIP_PENALTY: 1
+DATASET:
+  TYPE: ""
+  CONTENT_SCENES: []

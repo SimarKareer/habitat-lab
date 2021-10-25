@@ -305,7 +305,7 @@ class PPOTrainer(BaseRLTrainer):
             ppo_cfg.hidden_size,
             num_recurrent_layers=self.actor_critic.net.num_recurrent_layers,
             is_double_buffered=ppo_cfg.use_double_buffered_sampler,
-            action_shape=action_shape,
+            action_shape=(12,), #TODO: fix
             discrete_actions=discrete_actions,
         )
         self.rollouts.to(self.device)
@@ -440,7 +440,7 @@ class PPOTrainer(BaseRLTrainer):
                 step_batch["prev_actions"],
                 step_batch["masks"],
             )
-
+        # print("ACTIONS: ", actions)
         # NB: Move actions to CPU.  If CUDA tensors are
         # sent in to env.step(), that will create CUDA contexts
         # in the subprocesses.
@@ -456,10 +456,18 @@ class PPOTrainer(BaseRLTrainer):
         for index_env, act in zip(
             range(env_slice.start, env_slice.stop), actions.unbind(0)
         ):
-            if self.using_velocity_ctrl:
-                step_action = action_to_velocity_control(act)
-            else:
-                step_action = act.item()
+            # if self.using_velocity_ctrl:
+                # step_action = action_to_velocity_control(act)
+            # else:
+            #     step_action = act.item()
+            step_action = {
+                "action": {
+                    "action": "VELOCITY_CONTROL",
+                    "action_args": {
+                        "joint_deltas": act.cpu().numpy(),
+                    },
+                }
+            }
             self.envs.async_step_at(index_env, step_action)
 
         self.env_time += time.time() - t_step_env

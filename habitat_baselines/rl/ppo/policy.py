@@ -158,6 +158,7 @@ class LocomotionBaselinePolicy(Policy):
         observation_space: spaces.Dict,
         action_space,
         hidden_size: int = 512,
+        num_recurrent_layers: int = 3,
         policy_config = None,
         **kwargs,
     ):
@@ -165,9 +166,10 @@ class LocomotionBaselinePolicy(Policy):
             LocomotionBaselineNet(  # type: ignore
                 observation_space=observation_space,
                 hidden_size=hidden_size,
+                num_recurrent_layers=num_recurrent_layers,
                 **kwargs,
             ),
-            12, #TODO: fix
+            12, #TODO: fix, denotes number of action (1 for each joint)
             policy_config=policy_config
         )
 
@@ -179,6 +181,7 @@ class LocomotionBaselinePolicy(Policy):
             observation_space=observation_space,
             action_space=action_space,
             hidden_size=config.RL.PPO.hidden_size,
+            num_recurrent_layers=config.RL.DDPPO.num_recurrent_layers,
             policy_config=config.RL.POLICY
         )
 
@@ -296,6 +299,7 @@ class LocomotionBaselineNet(Net):
         self,
         observation_space: spaces.Dict,
         hidden_size: int,
+        num_recurrent_layers: int,
     ):
         super().__init__()
 
@@ -309,8 +313,11 @@ class LocomotionBaselineNet(Net):
         # self.visual_encoder = SimpleCNN(observation_space, hidden_size)
 
         self.state_encoder = build_rnn_state_encoder(
-            (0 if self.is_blind else self._hidden_size) + self.non_visual_size,
-            self._hidden_size,
+            input_size=(
+               0 if self.is_blind else self._hidden_size
+            ) + self.non_visual_size,
+            hidden_size=self._hidden_size,
+            num_layers=num_recurrent_layers,
         )
 
         self.train()
@@ -345,7 +352,8 @@ class LocomotionBaselineNet(Net):
         #     perception_embed = self.visual_encoder(observations)
         #     x = [perception_embed] + x
 
-        x = [observations["joint_pos"], observations["joint_vel"], observations["euler_rot"]]
+        # x = [observations["joint_pos"], observations["joint_vel"], observations["euler_rot"]]
+        x = [observations["joint_pos"]]
         x_out = torch.cat(x, dim=1)
 
 

@@ -42,139 +42,33 @@ def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
     return baseline_registry.get_env(env_name)
 
 
-@baseline_registry.register_env(name="LocomotionRLEnv")
-class LocomotionRLEnv(habitat.RLEnv):
-    def __init__(
-        self,
-        config: Config,
-        dataset: Optional[Dataset] = None,
-        *args,
-        **kwargs
-    ):
-        self.config = config
-        self.sim_config = config.TASK_CONFIG.SIMULATOR
-        self.task_config = config.TASK_CONFIG.TASK
-        self.debug_config = config.TASK_CONFIG.DEBUG
+class AlienGo:
+    def __init__(self, robot_id, sim, fixed_base, task_config):
+        self.robot_id = robot_id
+        self._sim = sim
+        self.fixed_base = fixed_base
+        self.task_config = task_config
 
-        # Debug flags
-        self.render_freq = self.debug_config.VIDEO_FREQ
-        if self.render_freq == -1:
-            self.render_freq = None
-        self.fixed_base = self.debug_config.FIXED_BASE
-        self.video_dir = config.VIDEO_DIR
-
-        # Set up actions
-        self.num_joints = config.TASK_CONFIG.TASK.ACTION.NUM_JOINTS
-        self.max_rad_delta = np.deg2rad(
-            config.TASK_CONFIG.TASK.ACTION.MAX_DEGREE_DELTA
-        )
-        self.action_space = ActionSpace(
-            {
-                "joint_targets": spaces.Box(
-                    low=np.ones(self.num_joints) * -self.max_rad_delta,
-                    high=np.ones(self.num_joints) * self.max_rad_delta,
-                    dtype=np.float32,
-                )
-            }
-        )
-        self.observation_space = spaces.Dict(
-            {
-                "joint_pos": spaces.Box(
-                    low=np.ones(self.num_joints) * -np.pi,
-                    high=np.ones(self.num_joints) * np.pi,
-                    dtype=np.float32,
-                ),
-                "joint_vel": spaces.Box(
-                    low=np.ones(self.num_joints) * -1000,
-                    high=np.ones(self.num_joints) * 1000,
-                    dtype=np.float32,
-                ),
-                "euler_rot": spaces.Box(
-                    low=np.ones(3) * -np.pi,
-                    high=np.ones(3) * np.pi,
-                    dtype=np.float32,
-                ),
-            }
-        )
-        self.number_of_episodes = int(1e6)
-
-        self.observation_space
-
-        # Create sim
-        cfg = self._make_configuration()
-        self._sim = habitat_sim.Simulator(cfg)
-
-        # Place agent
-        self._place_agent()
-
-        # Load the robot into the sim
-        ao_mgr = self._sim.get_articulated_object_manager()
-        self.robot_id = ao_mgr.add_articulated_object_from_urdf(
-            self.sim_config.ROBOT_URDF, fixed_base=self.fixed_base
-        )
-
-        # Load the floor
-        obj_template_mgr = self._sim.get_object_template_manager()
-        cube_handle = obj_template_mgr.get_template_handles("cubeSolid")[0]
-        cube_template_cpy = obj_template_mgr.get_template_by_handle(
-            cube_handle
-        )
-        cube_template_cpy.scale = np.array([5.0, 0.2, 5.0])
-        obj_template_mgr.register_template(cube_template_cpy)
-        rigid_obj_mgr = self._sim.get_rigid_object_manager()
-        ground_plane = rigid_obj_mgr.add_object_by_template_handle(cube_handle)
-        ground_plane.translation = [0.0, -0.2, 0.0]
-        ground_plane.motion_type = habitat_sim.physics.MotionType.STATIC
-
-        # RL init
-        self.target_joint_positions = np.array(
-            [
-                0,
-                0.432,
-                -0.77,
-                0,
-                0.432,
-                -0.77,
-                0,
-                0.432,
-                -0.77,
-                0,
-                0.432,
-                -0.77,
-            ]
-        )
+        self.jmsIdxToJoint = [
+            "FL_hip",
+            "FL_thigh",
+            "FL_calf",
+            "FR_hip",
+            "FR_thigh",
+            "FR_calf",
+            "RL_hip",
+            "RL_thigh",
+            "RL_calf",
+            "RR_hip",
+            "RR_thigh",
+            "RR_calf",
+        ]
 
         # joint position limits
         self.joint_limits_lower = np.array(
             [-0.1, -np.pi / 3, -5 / 6 * np.pi] * 4
         )
         self.joint_limits_upper = np.array([0.1, np.pi / 2.1, -np.pi / 4] * 4)
-
-        # Initialize attributes
-        self.viz_buffer = []
-        self.num_resets = 0
-        self.episode_steps = 0
-        self.render_episode = False
-        self.last_joint_pos = self.robot_id.joint_positions
-        self.sim_hz = self.sim_config.SIM_HZ
-        self.ctrl_hz = self.sim_config.CTRL_HZ
-        self.jmsIdxToJoint = {
-            0: "FL_hip",
-            1: "FL_thigh",
-            2: "FL_calf",
-            3: "FR_hip",
-            4: "FR_thigh",
-            5: "FR_calf",
-            6: "RL_hip",
-            7: "RL_thigh",
-            8: "RL_calf",
-            9: "RR_hip",
-            10: "RR_thigh",
-            11: "RR_calf",
-        }
-
-        # self._sim.set_gravity([0., 0., 0.])
-        # super().__init__(self._core_env_config, dataset)
 
     def _jms_copy(self, jms):
         """Returns a deep copy of a jms
@@ -204,11 +98,8 @@ class LocomotionRLEnv(habitat.RLEnv):
             1.0,  # max_impulse
         )
 
-    def _reset_prone(self):
-        """Resets robot in a legs bent stance"""
-        self.robot_id.clear_joint_states()
-        self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
-        self.robot_id.root_linear_velocity = mn.Vector3(0.0, 0.0, 0.0)
+    def prone(self):
+        # Bend legs
         calfDofs = [2, 5, 8, 11]
         pose = np.zeros(12, dtype=np.float32)
         for dof in calfDofs:
@@ -216,12 +107,18 @@ class LocomotionRLEnv(habitat.RLEnv):
             pose[dof - 1] = self.task_config.START.THIGH  # first joint
         self.robot_id.joint_positions = pose
 
+    def reset(self):
+        # Zero out the link and root velocities
+        self.robot_id.clear_joint_states()
+        self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
+        self.robot_id.root_linear_velocity = mn.Vector3(0.0, 0.0, 0.0)
+
         # Roll robot 90 deg
         base_transform = mn.Matrix4.rotation(
             mn.Rad(np.deg2rad(-90)), mn.Vector3(1.0, 0.0, 0.0)
         )
-        # Position above center of platform
 
+        # Position above center of platform
         base_transform.translation = (
             mn.Vector3(0.0, 0.8, 0.0)
             if self.fixed_base
@@ -229,9 +126,10 @@ class LocomotionRLEnv(habitat.RLEnv):
         )
         self.robot_id.transformation = base_transform
 
-    def _reset_robot(self):
-        """Resets robot's position and jms settings"""
-        self._reset_prone()
+        # Make robot prone
+        self.prone()
+
+        # Reset all jms
         base_jms = self._new_jms(0)
         for i in range(12):
             self.robot_id.update_joint_motor(i, base_jms)
@@ -240,86 +138,16 @@ class LocomotionRLEnv(habitat.RLEnv):
         self._set_joint_type_pos("calf", self.task_config.START.CALF)
 
     def _set_joint_type_pos(self, joint_type, joint_pos):
-        """Set's all joints of a given type to a given position
+        """Sets all joints of a given type to a given position
 
         Args:
             joint_type: type of joint ie hip, thigh or calf
             joint_pos: position to set these joints to
         """
-        for idx, joint_name in self.jmsIdxToJoint.items():
+        for idx, joint_name in enumerate(self.jmsIdxToJoint):
             if joint_type in joint_name:
-                # print(f"Updating {joint_name}({idx}) to {joint_pos}".format(joint_name, idx, joint_pos))
                 newjms = self._new_jms(joint_pos)
                 self.robot_id.update_joint_motor(idx, newjms)
-
-    def _place_agent(self):
-        """Places our camera agent in a spot it can see the robot"""
-        # place our agent in the scene
-        agent_state = habitat_sim.AgentState()
-        agent_state.position = [-1.1, 0.5, 1.1]
-        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-40), 0.0)
-        agent = self._sim.initialize_agent(0, agent_state)
-
-        return agent.scene_node.transformation_matrix()
-
-    def _make_configuration(self):
-        # simulator configuration
-        backend_cfg = habitat_sim.SimulatorConfiguration()
-        backend_cfg.enable_physics = True
-
-        # sensor configurations
-        rgb_camera = habitat_sim.CameraSensorSpec()
-        rgb_camera.uuid = "rgba_camera"
-        rgb_camera.sensor_type = habitat_sim.SensorType.COLOR
-
-        # Make camera res super low if we're not rendering
-        if self.render_freq == None:
-            rgb_camera.resolution = [1, 1]
-            # rgb_camera.resolution = [540, 720]#HACK
-        else:
-            rgb_camera.resolution = [540, 720]
-
-        rgb_camera.position = [0.0, 0.0, 0.0]
-        rgb_camera.orientation = [0.0, 0.0, 0.0]
-
-        # agent configuration
-        agent_cfg = habitat_sim.agent.AgentConfiguration()
-        agent_cfg.sensor_specifications = [rgb_camera]
-
-        return habitat_sim.Configuration(backend_cfg, [agent_cfg])
-
-    def close(self):
-        pass
-
-    def seed(self, seed):
-        torch.manual_seed(seed)
-        np.random.seed(seed)
-
-    def _simulate(self, steps=1, render=False):
-        """Runs physics simulator for given number of steps and returns sensor observations
-        Args:
-            steps: number of steps to take at 1/self.sim_hz timesteps
-            render: whether or not observations should include the camera images
-
-        Returns:
-            observations: an array indexed by time of dictionaries where each dictionary maps sensor name to value
-            ex) [{sensor name: sensorValue_0}, {sensor name: sensorValue_1}]
-        """
-        # simulate dt seconds at 60Hz to the nearest fixed timestep
-        observations = []
-        for _ in range(steps):
-            self._sim.step_physics(1.0 / self.sim_hz)
-            vis = {}
-            if render:
-                vis = self._sim.get_sensor_observations()
-                self.viz_buffer.append(vis)
-            obs = (
-                self._read_sensors()
-            )  # NOTE: It's important that this is run every time step physics is run so that the join velocity stays correct
-            # obs.update(vis)
-            observations.append(obs)
-
-        return observations
 
     def _add_jms_pos(self, joint_pos):
         """
@@ -335,21 +163,7 @@ class LocomotionRLEnv(habitat.RLEnv):
                 temp, self.joint_limits_lower[i], self.joint_limits_upper[i]
             )
             jms.position_target = self._fix_heading(pos_target)
-            # print("JMS{i}: {}".format{i=i})
-            # print(f'JMS {i}: {np.rad2deg(jms.position_target)}')
             self.robot_id.update_joint_motor(i, jms)
-
-    def _read_sensors(self):
-        """Returns sensor observation for joint positions and velocities"""
-        obs = {}
-        obs["joint_pos"] = np.array(self.robot_id.joint_positions)
-        obs["joint_vel"] = self._fix_heading(
-            np.array(self.robot_id.joint_positions)
-            - np.array(self.last_joint_pos)
-        ) / (1 / self.sim_hz)
-        obs["euler_rot"] = self._get_robot_rpy()
-        self.last_joint_pos = self.robot_id.joint_positions
-        return obs
 
     def _get_robot_rpy(self):
         """Given a numpy quaternion we'll return the roll pitch yaw
@@ -361,7 +175,6 @@ class LocomotionRLEnv(habitat.RLEnv):
         undo_rot = mn.Quaternion(
             ((np.sin(np.deg2rad(45)), 0.0, 0.0), np.cos(np.deg2rad(45)))
         ).normalized()
-        # print("quat: {quat}, undo_rot: {undo_rot}, mult: {mult}".format(quat=quat, undo_rot=undo_rot, mult=quat*undo_rot))
         quat = quat * undo_rot
 
         x, y, z = quat.vector
@@ -402,13 +215,220 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return headings
 
+
+@baseline_registry.register_env(name="LocomotionRLEnv")
+class LocomotionRLEnv(habitat.RLEnv):
+    def __init__(
+        self,
+        config: Config,
+        dataset: Optional[Dataset] = None,
+        *args,
+        **kwargs
+    ):
+        self.config = config
+        self.sim_config = config.TASK_CONFIG.SIMULATOR
+        self.task_config = config.TASK_CONFIG.TASK
+        self.debug_config = config.TASK_CONFIG.DEBUG
+
+        # Debug flags
+        self.render_freq = self.debug_config.VIDEO_FREQ
+        if self.render_freq == -1:
+            self.render_freq = None
+        self.fixed_base = self.debug_config.FIXED_BASE
+        self.video_dir = config.VIDEO_DIR
+
+        # Create action space
+        self.num_joints = config.TASK_CONFIG.TASK.ACTION.NUM_JOINTS
+        self.max_rad_delta = np.deg2rad(
+            config.TASK_CONFIG.TASK.ACTION.MAX_DEGREE_DELTA
+        )
+        self.action_space = ActionSpace(
+            {
+                "joint_targets": spaces.Box(
+                    low=-self.max_rad_delta,
+                    high=self.max_rad_delta,
+                    shape=(self.num_joints,),
+                    dtype=np.float32,
+                )
+            }
+        )
+
+        # Create observation space
+        self.observation_space = spaces.Dict(
+            {
+                "joint_pos": spaces.Box(
+                    low=-np.pi,
+                    high=np.pi,
+                    shape=(self.num_joints,),
+                    dtype=np.float32,
+                ),
+                "joint_vel": spaces.Box(
+                    low=-np.inf,
+                    high=np.inf,
+                    shape=(self.num_joints,),
+                    dtype=np.float32,
+                ),
+                "euler_rot": spaces.Box(  # Roll, pitch, and yaw
+                    low=-np.pi,
+                    high=np.pi,
+                    shape=(3,),
+                    dtype=np.float32,
+                ),
+            }
+        )
+
+        # Create simulator
+        cfg = self._make_sim_configuration()
+        self._sim = habitat_sim.Simulator(cfg)
+
+        # Place agent (for now, this just a camera)
+        self._place_agent()
+
+        # Load the robot into the sim
+        ao_mgr = self._sim.get_articulated_object_manager()
+        robot_id = ao_mgr.add_articulated_object_from_urdf(
+            self.sim_config.ROBOT_URDF, fixed_base=self.fixed_base
+        )
+        self.robot = AlienGo(
+            robot_id, self._sim, self.fixed_base, self.task_config
+        )
+
+        # Load the floor
+        obj_template_mgr = self._sim.get_object_template_manager()
+        cube_handle = obj_template_mgr.get_template_handles("cubeSolid")[0]
+        cube_template_cpy = obj_template_mgr.get_template_by_handle(
+            cube_handle
+        )
+        cube_template_cpy.scale = np.array([5.0, 0.2, 5.0])
+        obj_template_mgr.register_template(cube_template_cpy)
+        rigid_obj_mgr = self._sim.get_rigid_object_manager()
+        ground_plane = rigid_obj_mgr.add_object_by_template_handle(cube_handle)
+        ground_plane.translation = [0.0, -0.2, 0.0]
+        ground_plane.motion_type = habitat_sim.physics.MotionType.STATIC
+
+        # RL init
+        self.target_joint_positions = np.array(
+            [
+                0,
+                0.432,
+                -0.77,
+                0,
+                0.432,
+                -0.77,
+                0,
+                0.432,
+                -0.77,
+                0,
+                0.432,
+                -0.77,
+            ]
+        )
+
+        # Initialize attributes
+        self.viz_buffer = []
+        self.num_resets = 0
+        self.episode_steps = 0
+        self.render_episode = False
+        self.last_joint_pos = self.robot.robot_id.joint_positions
+        self.sim_hz = self.sim_config.SIM_HZ
+        self.ctrl_hz = self.sim_config.CTRL_HZ
+        self.number_of_episodes = int(1e24)
+
+        # self._sim.set_gravity([0., 0., 0.])
+        # super().__init__(self._core_env_config, dataset)
+
+    def _place_agent(self):
+        """Places our camera agent in a spot it can see the robot"""
+        # place our agent in the scene
+        agent_state = habitat_sim.AgentState()
+        agent_state.position = [-1.1, 0.5, 1.1]
+        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-40), 0.0)
+        agent = self._sim.initialize_agent(0, agent_state)
+
+        return agent.scene_node.transformation_matrix()
+
+    def _make_sim_configuration(self):
+        # Simulator configuration
+        backend_cfg = habitat_sim.SimulatorConfiguration()
+        backend_cfg.enable_physics = True
+
+        # Sensor configurations
+        rgb_camera = habitat_sim.CameraSensorSpec()
+        rgb_camera.uuid = "rgba_camera"
+        rgb_camera.sensor_type = habitat_sim.SensorType.COLOR
+
+        # Make camera res super low if we're not rendering
+        if self.render_freq == None:
+            rgb_camera.resolution = [1, 1]
+            # rgb_camera.resolution = [540, 720]#HACK
+        else:
+            rgb_camera.resolution = [540, 720]
+
+        rgb_camera.position = [0.0, 0.0, 0.0]
+        rgb_camera.orientation = [0.0, 0.0, 0.0]
+
+        # agent configuration
+        agent_cfg = habitat_sim.agent.AgentConfiguration()
+        agent_cfg.sensor_specifications = [rgb_camera]
+
+        return habitat_sim.Configuration(backend_cfg, [agent_cfg])
+
+    def close(self):
+        pass
+
+    def seed(self, seed):
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+    def _simulate(self, steps=1, render=False):
+        """Runs physics simulator for given number of steps and returns sensor
+        observations
+
+        Args:
+            steps: number of steps to take at 1/self.sim_hz timesteps
+            render: whether or not observations should include camera images
+
+        Returns:
+            observations: an array indexed by time of dictionaries where each
+            dictionary maps sensor name to value
+            ex) [{sensor name: sensorValue_0}, {sensor name: sensorValue_1}]
+        """
+        # simulate dt seconds at 60Hz to the nearest fixed timestep
+        observations = []
+        for _ in range(steps):
+            self._sim.step_physics(1.0 / self.sim_hz)
+            vis = {}
+            if render:
+                vis = self._sim.get_sensor_observations()
+                self.viz_buffer.append(vis)
+            obs = (
+                self._read_sensors()
+            )  # NOTE: It's important that this is run every time step physics
+            # is run so that the join velocity stays correct
+            # obs.update(vis)
+            observations.append(obs)
+
+        return observations
+
+    def _read_sensors(self):
+        """Returns sensor observation for joint positions and velocities"""
+        obs = {}
+        obs["joint_pos"] = np.array(self.robot.robot_id.joint_positions)
+        obs["joint_vel"] = self.robot._fix_heading(
+            np.array(self.robot.robot_id.joint_positions)
+            - np.array(self.last_joint_pos)
+        ) / (1 / self.sim_hz)
+        obs["euler_rot"] = self.robot._get_robot_rpy()
+        self.last_joint_pos = self.robot.robot_id.joint_positions
+        return obs
+
     def _step_reward(self, step_obs):
         joint_pos = np.array(step_obs["joint_pos"])
         target_joint_pos = np.array(self.target_joint_positions)
         # mse = (joint_pos - target_joint_pos)**2
         # mse = 0.5 * (self._fix_heading(joint_pos - target_joint_pos) ** 2).mean() #MSE loss
         mseexp = np.exp(
-            -5.0 * (self._fix_heading(joint_pos - target_joint_pos) ** 2).sum()
+            -5.0 * (self.robot._fix_heading(joint_pos - target_joint_pos) ** 2).sum()
         )  # sehoon's loss
         # print("MSE: ", mse)
 
@@ -434,7 +454,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.render_episode = self.render_freq != None and (
             self.num_resets % self.render_freq == 0
         )
-        self._reset_robot()
+        self.robot.reset()
 
         self.viz_buffer = []
         # Let the robot fall to the ground
@@ -458,7 +478,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.episode_steps += 1
         # print("ARGS: ", args) #TODO: RM
         # print("KWARGS: ", kwargs) #TODO: RM
-        self._add_jms_pos(deltas)  # NOTE: this seems a bit weird
+        self.robot._add_jms_pos(deltas)  # NOTE: this seems a bit weird
         # NOTE: SIM_HZ/CTRL_HZ allows us to update motors at correct freq.
         assert (
             int(self.sim_hz / self.ctrl_hz) == self.sim_hz / self.ctrl_hz

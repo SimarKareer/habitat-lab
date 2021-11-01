@@ -171,8 +171,11 @@ class PPOTrainer(BaseRLTrainer):
                 param.requires_grad_(False)
 
         if self.config.RL.DDPPO.reset_critic:
-            nn.init.orthogonal_(self.actor_critic.critic.fc.weight)
-            nn.init.constant_(self.actor_critic.critic.fc.bias, 0)
+            try:
+                nn.init.orthogonal_(self.actor_critic.critic.fc.weight)
+                nn.init.constant_(self.actor_critic.critic.fc.bias, 0)
+            except:
+                print("Failed to reset critic! Moving on.")
 
         self.agent = (DDPPO if self._is_distributed else PPO)(
             actor_critic=self.actor_critic,
@@ -461,12 +464,10 @@ class PPOTrainer(BaseRLTrainer):
             # else:
             #     step_action = act.item()
             step_action = {
-                "action": {
-                    "action": "VELOCITY_CONTROL",
-                    "action_args": {
-                        "joint_deltas": act.cpu().numpy(),
-                    },
-                }
+                "action": "null",
+                "action_args": {
+                    "joint_deltas": act.cpu().numpy(),
+                },
             }
             self.envs.async_step_at(index_env, step_action)
 

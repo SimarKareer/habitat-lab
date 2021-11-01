@@ -1,5 +1,6 @@
 ENVIRONMENT:
   MAX_EPISODE_STEPS: 500
+  SUCCESS_THRESH: 5
 SIMULATOR:
   ROBOT_URDF: data/URDF_demo_assets/aliengo/urdf/aliengo.urdf
   CTRL_HZ: 30
@@ -7,13 +8,13 @@ SIMULATOR:
   SETTLE_TIME: 20
 DEBUG:
   FIXED_BASE: True
-  VIDEO_FREQ: 1000 #None if you don't want any videos
+  VIDEO_FREQ: 1000 # None if you don't want any videos
   RENDER_OVERRIDE: False
 
 TASK:
   ACTION:
     NUM_JOINTS: 12
-    MAX_DEGREE_DELTA: 2 #in degrees
+    MAX_DEGREE_DELTA: 2 # in degrees
   START:
     CALF: -2.5
     THIGH: 1.3

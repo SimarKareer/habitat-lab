@@ -22,12 +22,15 @@ from habitat import Config, Dataset
 from habitat.core.spaces import ActionSpace
 from gym import spaces
 from habitat_baselines.common.baseline_registry import baseline_registry
+import habitat_baselines.common.knobs_environment
 import magnum as mn
 import quaternion as qt
 from habitat_sim.physics import JointMotorSettings
 from copy import copy
 import math
 import torch
+
+from habitat.utils.geometry_utils import wrap_heading
 
 
 def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
@@ -71,12 +74,38 @@ class AlienGo:
         self.joint_limits_upper = np.array([0.1, np.pi / 2.1, -np.pi / 4] * 4)
 
     @property
+    def height(self):
+        # Translation is [y, z, x]
+        return self.robot_id.rigid_state.translation[1]
+
+    @property
+    def joint_velocities(self) -> np.ndarray:
+        return np.array(self.robot_id.joint_velocities, dtype=np.float32)
+
+    @property
     def joint_positions(self) -> np.ndarray:
         return np.array(self.robot_id.joint_positions, dtype=np.float32)
 
     def set_joint_positions(self, pose):
-        self.robot_id.joint_positions = self._fix_heading(pose)
+        """This is kinematic! Not dynamic."""
+        self.robot_id.joint_positions = wrap_heading(pose)
 
+    def get_feet_contacts(self):
+        """THIS ASSUMES THAT THERE IS ONLY ONE ROBOT IN THE SIM
+        Returns np.array size 4, either 1s or 0s, for FL FR RL RR feet.
+        """
+        contacts = self._sim.get_physics_contact_points()
+        contacting_feet = set()
+        for c in contacts:
+            for link in [c.link_id_a, c.link_id_a]:
+                contacting_feet.add(self.robot_id.get_link_name(link))
+
+        return np.array(
+            [
+                1 if foot in contacting_feet else 0
+                for foot in ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+            ]
+        )
 
     def _jms_copy(self, jms):
         """Returns a deep copy of a jms
@@ -113,7 +142,13 @@ class AlienGo:
         for dof in calfDofs:
             pose[dof] = self.task_config.START.CALF  # second joint
             pose[dof - 1] = self.task_config.START.THIGH  # first joint
+
+        # Snap joints kinematically
         self.robot_id.joint_positions = pose
+
+        # Make motor controllers maintain this position
+        for idx, p in enumerate(pose):
+            self.robot_id.update_joint_motor(idx, self._new_jms(p))
 
     def reset(self):
         # Zero out the link and root velocities
@@ -134,9 +169,6 @@ class AlienGo:
         )
         self.robot_id.transformation = base_transform
 
-        # Make robot prone
-        self.prone()
-
         # Reset all jms
         base_jms = self._new_jms(0)
         for i in range(12):
@@ -154,10 +186,9 @@ class AlienGo:
         """
         for idx, joint_name in enumerate(self.jmsIdxToJoint):
             if joint_type in joint_name:
-                newjms = self._new_jms(joint_pos)
-                self.robot_id.update_joint_motor(idx, newjms)
+                self.robot_id.update_joint_motor(idx, self._new_jms(joint_pos))
 
-    def _add_jms_pos(self, joint_pos):
+    def add_jms_pos(self, joint_pos):
         """
         Updates existing joint positions by adding each position in array of
         joint_positions
@@ -166,14 +197,14 @@ class AlienGo:
         """
         for i, new_pos in enumerate(joint_pos):
             jms = self._jms_copy(self.robot_id.get_joint_motor_settings(i))
-            temp = jms.position_target + new_pos
-            pos_target = np.clip(
-                temp, self.joint_limits_lower[i], self.joint_limits_upper[i]
+            jms.position_target = np.clip(
+                wrap_heading(jms.position_target + new_pos),
+                self.joint_limits_lower[i],
+                self.joint_limits_upper[i],
             )
-            jms.position_target = self._fix_heading(pos_target)
             self.robot_id.update_joint_motor(i, jms)
 
-    def _get_robot_rpy(self):
+    def get_rpy(self):
         """Given a numpy quaternion we'll return the roll pitch yaw
 
         Returns:
@@ -189,7 +220,7 @@ class AlienGo:
         w = quat.scalar
 
         roll, pitch, yaw = self._euler_from_quaternion(x, y, z, w)
-        rpy = self._fix_heading(np.array([roll, pitch, yaw]))
+        rpy = wrap_heading(np.array([roll, pitch, yaw]))
         return rpy
 
     def _euler_from_quaternion(self, x, y, z, w):
@@ -214,20 +245,10 @@ class AlienGo:
 
         return roll_x, -yaw_z, pitch_y  # in radians
 
-    def _fix_heading(self, headings):
-        return (headings + np.pi) % (2 * np.pi) - np.pi
-
-def fix_heading(headings):
-    return (headings + np.pi) % (2 * np.pi) - np.pi
 
 @baseline_registry.register_env(name="LocomotionRLEnv")
 class LocomotionRLEnv(habitat.RLEnv):
-    def __init__(
-        self,
-        config: Config,
-        *args,
-        **kwargs
-    ):
+    def __init__(self, config: Config, *args, **kwargs):
         self.config = config
         self.sim_config = config.TASK_CONFIG.SIMULATOR
         self.task_config = config.TASK_CONFIG.TASK
@@ -239,7 +260,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         )
         self.action_space = ActionSpace(
             {
-                "joint_targets": spaces.Box(
+                "joint_deltas": spaces.Box(
                     low=-self.max_rad_delta,
                     high=self.max_rad_delta,
                     shape=(self.num_joints,),
@@ -257,6 +278,24 @@ class LocomotionRLEnv(habitat.RLEnv):
                     shape=(self.num_joints,),
                     dtype=np.float32,
                 ),
+                "joint_vel": spaces.Box(
+                    low=-np.pi,
+                    high=np.pi,
+                    shape=(self.num_joints,),
+                    dtype=np.float32,
+                ),
+                "euler_rot": spaces.Box(
+                    low=-np.pi,
+                    high=np.pi,
+                    shape=(3,),
+                    dtype=np.float32,
+                ),
+                "feet_contact": spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(4,),
+                    dtype=np.float32,
+                ),
             }
         )
 
@@ -267,7 +306,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self._place_agent()
 
         # Load the robot into the sim
-        self.fixed_base = True
+        self.fixed_base = False
         ao_mgr = self._sim.get_articulated_object_manager()
         robot_id = ao_mgr.add_articulated_object_from_urdf(
             self.sim_config.ROBOT_URDF, fixed_base=self.fixed_base
@@ -276,38 +315,139 @@ class LocomotionRLEnv(habitat.RLEnv):
             robot_id, self._sim, self.fixed_base, self.task_config
         )
 
+        # The following represents a standing pose:
+        self.target_joint_positions = np.array([0, 0.432, -0.77] * 4)
+
         # Initialize attributes
+        self.render = False
         self.viz_buffer = []
         self.num_steps = 0
         self._max_episode_steps = (
             config.TASK_CONFIG.ENVIRONMENT.MAX_EPISODE_STEPS
         )
+        self.success_thresh = np.deg2rad(
+            config.TASK_CONFIG.ENVIRONMENT.SUCCESS_THRESH
+        )
+        self.settle_time = config.TASK_CONFIG.SIMULATOR.SETTLE_TIME
+        self.use_exp_mse = self.config.RL.use_exp_mse
         self.render_episode = False
         self.last_joint_pos = self.robot.robot_id.joint_positions
         self.sim_hz = self.sim_config.SIM_HZ
         self.ctrl_hz = self.sim_config.CTRL_HZ
         self.number_of_episodes = int(1e24)  # needed b/c habitat wants it
+        self.goal_height = 0.486
+
+    def reset(self):
+        self.robot.reset()
+        self.robot.prone()
+
+        # Let robot settle on the ground
+        self._sim.step_physics(self.settle_time)
+
+        self.viz_buffer = []
+        self.num_steps = 0
+
+        return self.get_observations()
+
+    def get_observations(self):
+        return {
+            "joint_pos": self.robot.joint_positions,
+            "joint_vel": self.robot.joint_velocities,
+            "euler_rot": self.robot.get_rpy(),
+            "feet_contact": self.robot.get_feet_contacts(),
+        }
+
+    def get_reward(self, observations):
+        # Penalize roll and pitch
+        reward = -np.sum(np.abs(observations['euler_rot'][:2]))
+
+        # Penalize non-contacting feet
+        reward -= np.sum(1 - observations['feet_contact'])
+
+        # Penalize deviation from desired height
+        reward -= np.abs(self.robot.height - self.goal_height)
+
+        return reward
+
+    def step(self, action, action_args, *args, **kwargs):
+        """Updates robot with given actions and calls physics sim step"""
+        deltas = action_args["joint_deltas"]
+
+        # Clip actions and scale
+        deltas = np.clip(deltas, -1.0, 1.0) * self.max_rad_delta
+
+        """ Hack below! Overwrite actions to always do something successful """
+        USE_HACK = False
+        if USE_HACK:
+            deltas = []
+            for i, j in zip(
+                self.robot.joint_positions, self.target_joint_positions
+            ):
+                err = i - j
+                # Be more precise than necessary
+                if abs(err) > self.success_thresh / 3:
+                    # Flip direction based on error
+                    coeff = 1 if err < 0 else -1
+                    deltas.append(coeff * min(self.max_rad_delta, abs(err)))
+                else:
+                    deltas.append(0)
+            deltas = np.array(deltas, dtype=np.float32)
+        """ End of hack. """
+
+        # Update current state
+        self.robot.add_jms_pos(deltas)
+        self._sim.step_physics(1.0 / self.sim_hz)
+
+        # Return observations (error for each knob)
+        observations = self.get_observations()
+
+        # Get reward
+        reward = self.get_reward(observations)
+
+        # Check termination conditions
+        success = abs(self.robot.height - self.goal_height) < 0.05
+        self.num_steps += 1
+        done = self.num_steps == self._max_episode_steps
+
+        # Populate info for tensorboard
+        info = {
+            "success": 1.0 if success else 0.0,
+        }
+
+        return observations, reward, done, info
+
+    def _place_agent(self):
+        """Places our camera agent in a spot it can see the robot"""
+        # place our agent in the scene
+        agent_state = habitat_sim.AgentState()
+        agent_state.position = [-1.1, 0.5, 1.1]
+        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-40), 0.0)
+        agent = self._sim.initialize_agent(0, agent_state)
+
+        return agent.scene_node.transformation_matrix()
 
     def create_sim(self):
         # Simulator configuration
         backend_cfg = habitat_sim.SimulatorConfiguration()
+        backend_cfg.gpu_device_id = self.config.SIMULATOR_GPU_ID
         backend_cfg.enable_physics = True
-
-        # Sensor configurations
-        rgb_camera = habitat_sim.CameraSensorSpec()
-        rgb_camera.uuid = "rgba_camera"
-        rgb_camera.sensor_type = habitat_sim.SensorType.COLOR
-
-        # Make camera res super low if we're not rendering
-        # rgb_camera.resolution = [540, 720]
-        rgb_camera.resolution = [1, 1]
-
-        rgb_camera.position = [0.0, 0.0, 0.0]
-        rgb_camera.orientation = [0.0, 0.0, 0.0]
 
         # agent configuration
         agent_cfg = habitat_sim.agent.AgentConfiguration()
-        agent_cfg.sensor_specifications = [rgb_camera]
+        if self.render:
+            # Sensor configurations
+            rgb_camera = habitat_sim.CameraSensorSpec()
+            rgb_camera.uuid = "rgba_camera"
+            rgb_camera.sensor_type = habitat_sim.SensorType.COLOR
+
+            # Make camera res super low if we're not rendering
+            rgb_camera.resolution = [540, 720]
+            rgb_camera.position = [0.0, 0.0, 0.0]
+            rgb_camera.orientation = [0.0, 0.0, 0.0]
+
+            agent_cfg.sensor_specifications = [rgb_camera]
+        else:
+            agent_cfg.sensor_specifications = []
 
         cfg = habitat_sim.Configuration(backend_cfg, [agent_cfg])
 
@@ -329,16 +469,6 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return sim
 
-    def _place_agent(self):
-        """Places our camera agent in a spot it can see the robot"""
-        # place our agent in the scene
-        agent_state = habitat_sim.AgentState()
-        agent_state.position = [-1.1, 0.5, 1.1]
-        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-40), 0.0)
-        agent = self._sim.initialize_agent(0, agent_state)
-
-        return agent.scene_node.transformation_matrix()
-
     def close(self):
         pass
 
@@ -346,105 +476,6 @@ class LocomotionRLEnv(habitat.RLEnv):
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-    def _simulate(self, steps=1, render=False):
-        """Runs physics simulator for given number of steps and returns sensor
-        observations
-
-        Args:
-            steps: number of steps to take at 1/self.sim_hz timesteps
-            render: whether or not observations should include camera images
-
-        Returns:
-            observations: an array indexed by time of dictionaries where each
-            dictionary maps sensor name to value
-            ex) [{sensor name: sensorValue_0}, {sensor name: sensorValue_1}]
-        """
-        # simulate dt seconds at 60Hz to the nearest fixed timestep
-        observations = []
-        for _ in range(steps):
-            self._sim.step_physics(1.0 / self.sim_hz)
-            vis = {}
-            if render:
-                vis = self._sim.get_sensor_observations()
-                self.viz_buffer.append(vis)
-            obs = (
-                self._read_sensors()
-            )  # NOTE: It's important that this is run every time step physics
-            # is run so that the join velocity stays correct
-            # obs.update(vis)
-            observations.append(obs)
-
-        return observations
-
-    def reset(self):
-        """Resets episode by resetting robot, visualization buffer, and allowing robot to fall to ground
-
-        Args:
-            render_epsiode: whether or not to render video for this episode
-
-        Returns:
-            None
-        """
-        self.robot.reset()
-
-        # Randomize joint positions to between -30 and 30
-        self.robot.set_joint_positions(
-            (
-                np.random.rand(self.num_joints) * 2 - 1
-            ) * np.deg2rad(30)
-        )
-
-        self.viz_buffer = []
-        self.num_steps = 0
-        self.cumul_reward = 0
-
-        return {
-            'joint_pos': self.robot.joint_positions
-        }
-
-    def step(self, action, *args, **kwargs):
-        """Updates robot with given actions and calls physics sim step"""
-        deltas = action["action_args"]["joint_deltas"]
-
-        # Clip actions and scale
-        deltas = np.clip(deltas, -1.0, 1.0) * self.max_rad_delta
-
-        # '''Hack!'''
-        # deltas = []
-        # for i in self.robot.joint_positions:
-        #     if i > np.deg2rad(3):
-        #         deltas.append(-self.max_rad_delta)
-        #     elif i < np.deg2rad(-3):
-        #         deltas.append(-self.max_rad_delta)
-        #     else:
-        #         deltas.append(0)
-        # deltas = np.array(deltas, dtype=np.float32)
-
-        # Update current state
-        self.robot.set_joint_positions(self.robot.joint_positions + deltas)
-
-        # Return observations (error for each knob)
-        observations = {
-            'joint_pos': self.robot.joint_positions
-        }
-
-        # Penalize MSE
-        reward = 0.5 * -np.mean(self.robot.joint_positions ** 2)
-
-        # Check termination conditions
-        success = (abs(self.robot.joint_positions) < np.deg2rad(3)).all()
-
-        self.num_steps += 1
-        done = success or self.num_steps == self._max_episode_steps
-
-        self.cumul_reward += reward
-
-        info = {
-            'success': 1.0 if success else 0.0,
-            'cumul_reward': self.cumul_reward
-        }
-
-        return observations, reward, done, info
 
 
 @baseline_registry.register_env(name="RearrangeRLEnv")

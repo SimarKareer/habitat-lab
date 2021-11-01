@@ -97,9 +97,8 @@ class AlienGo:
         contacts = self._sim.get_physics_contact_points()
         contacting_feet = set()
         for c in contacts:
-            for link in [c.link_id_a, c.link_id_a]:
+            for link in [c.link_id_a, c.link_id_b]:
                 contacting_feet.add(self.robot_id.get_link_name(link))
-
         return np.array(
             [
                 1 if foot in contacting_feet else 0

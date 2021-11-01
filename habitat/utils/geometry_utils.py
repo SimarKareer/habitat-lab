@@ -12,6 +12,12 @@ import quaternion
 EPSILON = 1e-8
 
 
+def wrap_heading(headings: Union[float, np.array]):
+    r"""Takes single or array of headings and wraps between [-pi, pi]
+    """
+    return (headings + np.pi) % (2 * np.pi) - np.pi
+
+
 def angle_between_quaternions(q1: np.quaternion, q2: np.quaternion) -> float:
     r"""Returns the angle (in radians) between two quaternions. This angle will
     always be positive.

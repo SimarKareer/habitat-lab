@@ -1,21 +1,21 @@
 VERBOSE: False
-BASE_TASK_CONFIG_PATH: "configs/tasks/locomotion_stand.yaml"
+BASE_TASK_CONFIG_PATH: "configs/tasks/locomotion_stand_eval.yaml"
 TRAINER_NAME: "ddppo"
 ENV_NAME: "LocomotionRLEnv"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
 VIDEO_OPTION: []
 TENSORBOARD_DIR: "tb"
-VIDEO_DIR: "videos"
+VIDEO_DIR: "/coc/testnvme/skareer6/Projects/InverseKinematics/stand_exp/videos"
 TEST_EPISODE_COUNT: -1
-EVAL_CKPT_PATH_DIR: "data/new_checkpoints"
-NUM_ENVIRONMENTS: 50
+EVAL_CKPT_PATH_DIR: "/nethome/skareer6/flash/Projects/InverseKinematics/stand_exp/checkpoints5e-4expmse/"
+NUM_ENVIRONMENTS: 2
 SENSORS: ["DEPTH_SENSOR"]
 CHECKPOINT_FOLDER: "data/new_checkpoints"
 NUM_UPDATES: -1
-TOTAL_NUM_STEPS: 2.5e9
+TOTAL_NUM_STEPS: 1001.0
 LOG_INTERVAL: 10
-NUM_CHECKPOINTS: 100
+NUM_CHECKPOINTS: 1
 # Force PyTorch to be single threaded as
 # this improves performance considerably
 FORCE_TORCH_SINGLE_THREADED: True
@@ -58,9 +58,9 @@ RL:
     # The PyTorch distributed backend to use
     distrib_backend: NCCL
     # Visual encoder backbone
-    pretrained_weights: data/ddppo-models/gibson-2plus-resnet50.pth
+    pretrained_weights: /nethome/skareer6/flash/Projects/InverseKinematics/stand_exp/checkpoints5e-4expmse/ckpt.98.pth
     # Initialize with pretrained weights
-    pretrained: False
+    pretrained: True 
     # Initialize just the visual encoder backbone with pretrained weights
     pretrained_encoder: False
     # Whether or not the visual encoder backbone will be trained.

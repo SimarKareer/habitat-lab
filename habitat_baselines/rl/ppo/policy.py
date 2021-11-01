@@ -345,13 +345,21 @@ class LocomotionBaselineNet(Net):
         #     perception_embed = self.visual_encoder(observations)
         #     x = [perception_embed] + x
 
+
+        # print("OBS: ", observations)
         x = [observations["joint_pos"], observations["joint_vel"], observations["euler_rot"]]
         x_out = torch.cat(x, dim=1)
-
+        x_out = x_out.float()
+        # print("x_out: ", x_out.shape)
+        # print("RNN_hidden: ", rnn_hidden_states.shape)
+        # print("masks", masks.shape)
+        # exit()
 
         # x_out = observations[]
         x_out, rnn_hidden_states = self.state_encoder(
             x_out, rnn_hidden_states, masks
         )
+
+        # print("final x_out: ", x_out.shape)
 
         return x_out, rnn_hidden_states

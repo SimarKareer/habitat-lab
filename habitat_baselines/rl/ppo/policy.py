@@ -23,6 +23,7 @@ from habitat_baselines.rl.models.rnn_state_encoder import (
 from habitat_baselines.rl.models.simple_cnn import SimpleCNN
 from habitat_baselines.utils.common import CategoricalNet, GaussianNet
 
+import numpy as np
 
 class Policy(nn.Module, metaclass=abc.ABCMeta):
     def __init__(self, net, dim_actions, policy_config=None):
@@ -166,12 +167,14 @@ class LocomotionBaselinePolicy(Policy):
             list(x.values()),
             dim=1,
         )
-
-        self.critic.fc = nn.Sequential(
+        layers = [
             extract_observation_values,
             construct_mlp(self.net.non_visual_size, mlp_hidden_sizes),
             nn.Linear(mlp_hidden_sizes[-1], 1),
-        )
+        ]
+        nn.init.orthogonal_(layers[-1].weight, gain=np.sqrt(2))
+        nn.init.constant_(layers[-1].bias, 0)
+        self.critic.fc = nn.Sequential(*layers)
         self.critic_is_head = False
 
     @classmethod
@@ -215,7 +218,11 @@ def construct_mlp(input_size, mlp_hidden_sizes):
 
     # Stack of Linear and ReLUs
     for hidden_units in mlp_hidden_sizes:
-        layers.append(nn.Linear(previous_hidden_units, hidden_units))
+        layers.append(
+            nn.Linear(previous_hidden_units, hidden_units)
+        )
+        nn.init.orthogonal_(layers[-1].weight, gain=np.sqrt(2))
+        nn.init.constant_(layers[-1].bias, 0)
         layers.append(nn.ReLU())
         previous_hidden_units = hidden_units
 

@@ -300,6 +300,13 @@ class PPOTrainer(BaseRLTrainer):
 
         self._nbuffers = 2 if ppo_cfg.use_double_buffered_sampler else 1
 
+        # TODO: Assuming all actions are 1D vectors
+        num_actions = sum(
+            [
+                action.shape[0]
+                for action in self.envs.action_spaces[0].spaces.values()
+            ]
+        )
         self.rollouts = RolloutStorage(
             ppo_cfg.num_steps,
             self.envs.num_envs,
@@ -308,7 +315,7 @@ class PPOTrainer(BaseRLTrainer):
             ppo_cfg.hidden_size,
             num_recurrent_layers=self.actor_critic.net.num_recurrent_layers,
             is_double_buffered=ppo_cfg.use_double_buffered_sampler,
-            action_shape=(12,), #TODO: fix
+            action_shape=(num_actions,),
             discrete_actions=discrete_actions,
         )
         self.rollouts.to(self.device)
@@ -460,13 +467,15 @@ class PPOTrainer(BaseRLTrainer):
             range(env_slice.start, env_slice.stop), actions.unbind(0)
         ):
             # if self.using_velocity_ctrl:
-                # step_action = action_to_velocity_control(act)
+            # step_action = action_to_velocity_control(act)
             # else:
             #     step_action = act.item()
+            # TODO: Here, we are assuming only one key in ActionSpace dict
+            action_key = list(self.envs.action_spaces[0].spaces.keys())[0]
             step_action = {
                 "action": "null",
                 "action_args": {
-                    "joint_deltas": act.cpu().numpy(),
+                    action_key: act.cpu().numpy(),
                 },
             }
             self.envs.async_step_at(index_env, step_action)

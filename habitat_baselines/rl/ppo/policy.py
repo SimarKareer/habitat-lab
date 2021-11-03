@@ -30,7 +30,6 @@ class Policy(nn.Module, metaclass=abc.ABCMeta):
         self.net = net
         self.dim_actions = dim_actions
 
-        print("policy_config: ", policy_config)
         if policy_config is None:
             self.action_distribution_type = "categorical"
         else:
@@ -134,6 +133,159 @@ class CriticHead(nn.Module):
 
 
 @baseline_registry.register_policy
+class LocomotionBaselinePolicy(Policy):
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        action_space,
+        mlp_hidden_sizes: list,
+        hidden_size: int = 512,
+        num_recurrent_layers: int = 3,
+        policy_config=None,
+        **kwargs,
+    ):
+        # Assume that each action is 1-dimensional
+        num_actions = sum(
+            [action.shape[0] for action in action_space.spaces.values()]
+        )
+        super().__init__(
+            LocomotionBaselineNet(  # type: ignore
+                observation_space=observation_space,
+                hidden_size=hidden_size,
+                num_recurrent_layers=num_recurrent_layers,
+                mlp_hidden_sizes=mlp_hidden_sizes,
+                **kwargs,
+            ),
+            num_actions,
+            policy_config=policy_config,
+        )
+
+        # Need to make a module that extracts data from a TensorDict
+        extract_observation_values = nn.Module()
+        extract_observation_values.forward = lambda x: torch.cat(
+            list(x.values()),
+            dim=1,
+        )
+
+        self.critic.fc = nn.Sequential(
+            extract_observation_values,
+            construct_mlp(self.net.non_visual_size, mlp_hidden_sizes),
+            nn.Linear(mlp_hidden_sizes[-1], 1),
+        )
+        self.critic_is_head = False
+
+    @classmethod
+    def from_config(
+        cls, config: Config, observation_space: spaces.Dict, action_space
+    ):
+        return cls(
+            observation_space=observation_space,
+            action_space=action_space,
+            mlp_hidden_sizes=config.RL.PPO.mlp_hidden_sizes,
+            hidden_size=config.RL.PPO.hidden_size,
+            num_recurrent_layers=config.RL.DDPPO.num_recurrent_layers,
+            policy_config=config.RL.POLICY,
+        )
+
+
+class Net(nn.Module, metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def output_size(self):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def num_recurrent_layers(self):
+        pass
+
+    @property
+    @abc.abstractmethod
+    def is_blind(self):
+        pass
+
+
+def construct_mlp(input_size, mlp_hidden_sizes):
+    layers = []
+    previous_hidden_units = input_size
+
+    # Stack of Linear and ReLUs
+    for hidden_units in mlp_hidden_sizes:
+        layers.append(nn.Linear(previous_hidden_units, hidden_units))
+        layers.append(nn.ReLU())
+        previous_hidden_units = hidden_units
+
+    return nn.Sequential(*layers)
+
+
+class LocomotionBaselineNet(Net):
+    r"""Network which passes the input image through CNN if provided and concatenates
+    goal vector with CNN's output and passes that through RNN.
+
+    NOTE: for simplicity I'm assuming that observation_space is not a nested dict.
+    """
+
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        hidden_size: int,
+        num_recurrent_layers: int,
+        mlp_hidden_sizes: list,
+    ):
+        super().__init__()
+
+        # Assuming every observation type/key is 1D, and we use ALL of them
+        self.non_visual_size = sum(
+            [v.shape[0] for v in observation_space.spaces.values()]
+        )
+
+        self._hidden_size = hidden_size
+
+        # Can't delete this... RolloutStorage uses this to know hidden size.
+        self.state_encoder = build_rnn_state_encoder(
+            self.non_visual_size,
+            hidden_size=self._hidden_size,
+            num_layers=num_recurrent_layers,
+        )
+
+        self._mlp_output_size = mlp_hidden_sizes[-1]
+        self.mlp = construct_mlp(self.non_visual_size, mlp_hidden_sizes)
+
+        self.train()
+
+    @property
+    def output_size(self):
+        return self._mlp_output_size
+
+    @property
+    def is_blind(self):
+        return True  # NOTE: need to change if we add back CNN
+
+    @property
+    def num_recurrent_layers(self):
+        return self.state_encoder.num_recurrent_layers
+
+    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
+        x = list(observations.values())
+        x_out = torch.cat(x, dim=1)
+        x_out = self.mlp(x_out)
+
+        # Dummy hidden state
+        rnn_hidden_states = torch.zeros(
+            x_out.shape[0],  # number of environments
+            self.state_encoder.num_recurrent_layers,
+            self._hidden_size,
+            device=x_out.device,
+        )
+
+        return x_out, rnn_hidden_states
+
+
+@baseline_registry.register_policy
 class PointNavBaselinePolicy(Policy):
     def __init__(
         self,
@@ -163,78 +315,6 @@ class PointNavBaselinePolicy(Policy):
             hidden_size=config.RL.PPO.hidden_size,
             policy_config=config.RL.POLICY,
         )
-
-
-@baseline_registry.register_policy
-class LocomotionBaselinePolicy(Policy):
-    def __init__(
-        self,
-        observation_space: spaces.Dict,
-        action_space,
-        hidden_size: int = 512,
-        num_recurrent_layers: int = 3,
-        policy_config=None,
-        **kwargs,
-    ):
-        super().__init__(
-            LocomotionBaselineNet(  # type: ignore
-                observation_space=observation_space,
-                hidden_size=hidden_size,
-                num_recurrent_layers=num_recurrent_layers,
-                **kwargs,
-            ),
-            12,  # TODO: fix, denotes number of action (1 for each joint)
-            policy_config=policy_config,
-        )
-
-        # Need to make a module that extracts data from a TensorDict
-        extract_observation_values = nn.Module()
-        extract_observation_values.forward = lambda x: torch.cat(
-            list(x.values()), dim=1,
-        )
-
-        self.critic.fc = nn.Sequential(
-            extract_observation_values,
-            nn.Linear(self.net.non_visual_size, 256),
-            nn.Tanh(),
-            nn.Linear(256, 256),
-            nn.Tanh(),
-            nn.Linear(256, 1),
-        )
-        self.critic_is_head = False
-
-    @classmethod
-    def from_config(
-        cls, config: Config, observation_space: spaces.Dict, action_space
-    ):
-        return cls(
-            observation_space=observation_space,
-            action_space=action_space,
-            hidden_size=config.RL.PPO.hidden_size,
-            num_recurrent_layers=config.RL.DDPPO.num_recurrent_layers,
-            policy_config=config.RL.POLICY,
-        )
-
-
-class Net(nn.Module, metaclass=abc.ABCMeta):
-    @abc.abstractmethod
-    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
-        pass
-
-    @property
-    @abc.abstractmethod
-    def output_size(self):
-        pass
-
-    @property
-    @abc.abstractmethod
-    def num_recurrent_layers(self):
-        pass
-
-    @property
-    @abc.abstractmethod
-    def is_blind(self):
-        pass
 
 
 class PointNavBaselineNet(Net):
@@ -323,70 +403,6 @@ class PointNavBaselineNet(Net):
         x_out = self.goal_encoder(x_out)
         x_out, rnn_hidden_states = self.state_encoder(
             x_out, rnn_hidden_states, masks
-        )
-
-        return x_out, rnn_hidden_states
-
-
-class LocomotionBaselineNet(Net):
-    r"""Network which passes the input image through CNN if provided and concatenates
-    goal vector with CNN's output and passes that through RNN.
-
-    NOTE: for simplicity I'm assuming that observation_space is not a nested dict.
-    """
-
-    def __init__(
-        self,
-        observation_space: spaces.Dict,
-        hidden_size: int,
-        num_recurrent_layers: int,
-    ):
-        super().__init__()
-
-        # Assuming that each observation type/key is 1D
-        self.non_visual_size = sum(
-            [v.shape[0] for v in observation_space.spaces.values()]
-        )
-
-        self._hidden_size = hidden_size
-
-        self.state_encoder = build_rnn_state_encoder(
-            self.non_visual_size,
-            hidden_size=self._hidden_size,
-            num_layers=num_recurrent_layers,
-        )
-
-        self.mlp = nn.Sequential(
-            nn.Linear(self.non_visual_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-        )
-
-        self.train()
-
-    @property
-    def output_size(self):
-        return self._hidden_size
-
-    @property
-    def is_blind(self):
-        return True  # NOTE: need to change if we add back CNN
-
-    @property
-    def num_recurrent_layers(self):
-        return self.state_encoder.num_recurrent_layers
-
-    def forward(self, observations, rnn_hidden_states, prev_actions, masks):
-        x = list(observations.values())
-        x_out = torch.cat(x, dim=1)
-        x_out = self.mlp(x_out)
-
-        # Dummy hidden state
-        rnn_hidden_states = torch.zeros(
-            x_out.shape[0], 3, 256, device=x_out.device
         )
 
         return x_out, rnn_hidden_states

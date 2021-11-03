@@ -1,5 +1,5 @@
 VERBOSE: False
-BASE_TASK_CONFIG_PATH: "configs/tasks/locomotion_stand.yaml"
+BASE_TASK_CONFIG_PATH: "configs/tasks/knobs.yaml"
 TRAINER_NAME: "ddppo"
 ENV_NAME: "KnobsEnv"
 SIMULATOR_GPU_ID: 0
@@ -34,7 +34,7 @@ RL:
     num_mini_batch: 4
     value_loss_coef: 0.5
     entropy_coef: 0.01
-    lr: 0.001
+    lr: 0.0001
     eps: 0.00001
     max_grad_norm: 0.5
     num_steps: 512
@@ -48,6 +48,7 @@ RL:
     use_normalized_advantage: True
 
     hidden_size: 256
+    mlp_hidden_sizes: [128, 64]
 
     # Use double buffered sampling, typically helps
     # when environment time is similar or large than

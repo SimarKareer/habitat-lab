@@ -43,11 +43,14 @@ class RolloutStorage:
                 )
             )
 
+        self.num_envs = num_envs
+        self.num_recurrent_layers = num_recurrent_layers
+        self.recurrent_hidden_state_size = recurrent_hidden_state_size
         self.buffers["recurrent_hidden_states"] = torch.zeros(
             numsteps + 1,
-            num_envs,
-            num_recurrent_layers,
-            recurrent_hidden_state_size,
+            self.num_envs,
+            self.num_recurrent_layers,
+            self.recurrent_hidden_state_size,
         )
 
         self.buffers["rewards"] = torch.zeros(numsteps + 1, num_envs, 1)
@@ -190,6 +193,62 @@ class RolloutStorage:
                     * self.buffers["masks"][step + 1]
                     + self.buffers["rewards"][step]
                 )
+
+    def feed_forward_generator(
+        self, advantages, num_mini_batch=None, mini_batch_size=None
+    ):
+        num_steps, num_processes = self.buffers["rewards"].size()[0:2]
+        batch_size = num_processes * self.current_rollout_step_idx
+
+        if mini_batch_size is None:
+            assert batch_size >= num_mini_batch, (
+                "PPO requires the number of processes ({}) "
+                "* number of steps ({}) = {} "
+                "to be greater than or equal to the number of PPO mini batches ({})."
+                "".format(
+                    num_processes,
+                    num_steps,
+                    num_processes * num_steps,
+                    num_mini_batch,
+                )
+            )
+
+        # Flatten each sensor of observation TensorDict
+        flattened_obs = TensorDict(
+            {
+                k: v[: self.current_rollout_step_idx].view(-1, *v.size()[2:])
+                for k, v in self.buffers["observations"].items()
+            }
+        )
+
+        flattened_data = {
+            "observations": flattened_obs,
+            "advantages": advantages[: self.current_rollout_step_idx].view(
+                -1, 1
+            ),
+        }
+
+        flattened_data.update(
+            {
+                k: v[: self.current_rollout_step_idx].view(-1, v.size(-1))
+                for k, v in self.buffers.items()
+                if k != "observations"
+            }
+        )
+
+        dummy_hidden_state = torch.zeros(
+            1,  # self.num_envs,
+            self.num_recurrent_layers,
+            self.recurrent_hidden_state_size,
+            dtype=torch.float32,
+            device=self.buffers["rewards"].device
+        )
+
+        for inds in torch.randperm(batch_size).chunk(num_mini_batch):
+            batch = TensorDict({k: v[inds] for k, v in flattened_data.items()})
+            batch["recurrent_hidden_states"] = dummy_hidden_state
+
+            yield batch
 
     def recurrent_generator(self, advantages, num_mini_batch) -> TensorDict:
         num_environments = advantages.size(1)

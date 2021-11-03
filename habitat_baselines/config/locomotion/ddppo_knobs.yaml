@@ -37,7 +37,7 @@ RL:
     lr: 0.0001
     eps: 0.00001
     max_grad_norm: 0.5
-    num_steps: 512
+    num_steps: 256
     use_gae: True
     gamma: 0.99
     tau: 0.95

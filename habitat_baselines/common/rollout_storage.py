@@ -9,7 +9,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
-
+from torch.functional import Tensor
+from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 from habitat_baselines.common.tensor_dict import TensorDict
 
 
@@ -49,6 +50,8 @@ class RolloutStorage:
             num_recurrent_layers,
             recurrent_hidden_state_size,
         )
+
+        self.dummy_hidden_state = torch.zeros(1, 2, 128, device='cuda:0')
 
         self.buffers["rewards"] = torch.zeros(numsteps + 1, num_envs, 1)
         self.buffers["value_preds"] = torch.zeros(numsteps + 1, num_envs, 1)
@@ -190,6 +193,61 @@ class RolloutStorage:
                     * self.buffers["masks"][step + 1]
                     + self.buffers["rewards"][step]
                 )
+
+    def feed_forward_generator(
+        self, advantages, num_mini_batch=None, mini_batch_size=None
+    ):
+        num_steps, num_processes = self.buffers['rewards'].size()[0:2]
+        batch_size = num_processes * self.current_rollout_step_idx
+
+        if mini_batch_size is None:
+            assert batch_size >= num_mini_batch, (
+                "PPO requires the number of processes ({}) "
+                "* number of steps ({}) = {} "
+                "to be greater than or equal to the number of PPO mini batches ({})."
+                "".format(
+                    num_processes,
+                    num_steps,
+                    num_processes * num_steps,
+                    num_mini_batch,
+                )
+            )
+            mini_batch_size = batch_size // num_mini_batch
+
+        
+        # Pool and flatten experiences from all workers
+        all_obs = self.buffers['observations'][:self.current_rollout_step_idx]['joint_pos'].view(-1, *self.buffers['observations']['joint_pos'].size()[2:])
+        all_obs = TensorDict(joint_pos=all_obs)
+        all_actions = self.buffers['actions'][:self.current_rollout_step_idx].view(-1, self.buffers['actions'].size(-1))
+        all_prev_actions = self.buffers['prev_actions'][:self.current_rollout_step_idx].view(-1, self.buffers['prev_actions'].size(-1))
+        all_value_preds = self.buffers['value_preds'][:self.current_rollout_step_idx].view(-1, 1)
+        all_returns = self.buffers['returns'][:self.current_rollout_step_idx].view(-1, 1)
+        all_masks = self.buffers['masks'][:self.current_rollout_step_idx].view(-1, 1)
+        all_old_action_log_probs = self.buffers['action_log_probs'].view(-1, 1)
+        all_advantages = advantages[:self.current_rollout_step_idx].view(-1, 1)
+
+        for inds in torch.randperm(batch_size).chunk(num_mini_batch):
+            obs_batch = all_obs[inds]
+            actions_batch = all_actions[inds]
+            prev_actions_batch = all_prev_actions[inds]
+            value_preds_batch = all_value_preds[inds]
+            returns_batch = all_returns[inds]
+            masks_batch = all_masks[inds]
+            old_action_log_probs_batch = all_old_action_log_probs[inds]
+            hidden_state_batch = self.dummy_hidden_state
+
+            batch = TensorDict()
+            batch['observations'] = obs_batch
+            batch['actions'] = actions_batch
+            batch['prev_actions'] = prev_actions_batch
+            batch['value_preds'] = value_preds_batch
+            batch['returns'] = returns_batch
+            batch['advantages'] = all_advantages[inds]
+            batch['masks'] = masks_batch
+            batch['action_log_probs'] = old_action_log_probs_batch
+            batch['recurrent_hidden_states'] = hidden_state_batch
+
+            yield batch
 
     def recurrent_generator(self, advantages, num_mini_batch) -> TensorDict:
         num_environments = advantages.size(1)

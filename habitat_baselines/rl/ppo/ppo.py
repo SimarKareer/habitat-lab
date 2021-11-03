@@ -78,7 +78,10 @@ class PPO(nn.Module):
 
         for _e in range(self.ppo_epoch):
             profiling_wrapper.range_push("PPO.update epoch")
-            data_generator = rollouts.recurrent_generator(
+            # data_generator = rollouts.recurrent_generator(
+            #     advantages, self.num_mini_batch
+            # )
+            data_generator = rollouts.feed_forward_generator(
                 advantages, self.num_mini_batch
             )
 

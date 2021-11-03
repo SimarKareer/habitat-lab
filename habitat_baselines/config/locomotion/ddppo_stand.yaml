@@ -29,8 +29,8 @@ RL:
   PPO:
     # ppo params
     clip_param: 0.2
-    ppo_epoch: 2
-    num_mini_batch: 2
+    ppo_epoch: 4
+    num_mini_batch: 4
     value_loss_coef: 0.5
     entropy_coef: 0.01
     lr: 2.5e-4
@@ -43,10 +43,12 @@ RL:
     use_linear_clip_decay: False
     use_linear_lr_decay: False
     reward_window_size: 50
+    
 
     use_normalized_advantage: False
 
-    hidden_size: 512
+    hidden_size: 128 
+    mlp_hidden_sizes: [128, 64]
 
     # Use double buffered sampling, typically helps
     # when environment time is similar or large than

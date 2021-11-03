@@ -12,7 +12,7 @@ DEBUG:
 
 TASK:
   ACTION:
-    NUM_JOINTS: 12
+    NUM_JOINTS: 3
     MAX_DEGREE_DELTA: 2 #in degrees
   START:
     CALF: -2.5

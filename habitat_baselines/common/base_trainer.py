@@ -113,7 +113,8 @@ class BaseTrainer:
                 )
             else:
                 # evaluate multiple checkpoints in order
-                prev_ckpt_ind = -1
+                prev_ckpt_ind = 98 #HACK FIX
+                # prev_ckpt_ind = self.config.FIRST_CKPT
                 while True:
                     current_ckpt = None
                     while current_ckpt is None:

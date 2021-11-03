@@ -58,7 +58,7 @@ RL:
     # The PyTorch distributed backend to use
     distrib_backend: NCCL
     # Visual encoder backbone
-    pretrained_weights: /nethome/skareer6/flash/Projects/InverseKinematics/stand_exp/checkpoints5e-4expmse/ckpt.98.pth
+    pretrained_weights: /nethome/skareer6/flash/Projects/InverseKinematics/stand_exp/checkpoints5e-4S/ckpt.0.pth
     # Initialize with pretrained weights
     pretrained: True 
     # Initialize just the visual encoder backbone with pretrained weights

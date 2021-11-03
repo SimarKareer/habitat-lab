@@ -30,12 +30,12 @@ class AlienGo:
         # joint position limits
         self.joint_limits_lower = np.array(
             [-0.1, -np.pi / 3, -5 / 6 * np.pi] * 4
-        )
-        self.joint_limits_upper = np.array([0.1, np.pi / 2.1, -np.pi / 4] * 4)
+        )[:3]
+        self.joint_limits_upper = np.array([0.1, np.pi / 2.1, -np.pi / 4] * 4)[:3]
 
     @property
     def joint_positions(self) -> np.ndarray:
-        return np.array(self.robot_id.joint_positions, dtype=np.float32)
+        return np.array(self.robot_id.joint_positions, dtype=np.float32)[:3]
 
     def set_joint_positions(self, pose):
         self.robot_id.joint_positions = wrap_heading(pose)

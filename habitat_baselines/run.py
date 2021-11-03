@@ -61,6 +61,12 @@ def execute_exp(config: Config, run_type: str) -> None:
     elif run_type == "eval":
         trainer.eval()
 
+PATHS_TO_JUNK = {
+    'LOG_FILE': '/coc/testnvme/skareer6/Projects/junk/train.log',
+    'CHECKPOINT_FOLDER': '/coc/testnvme/skareer6/Projects/junk',
+    'TENSORBOARD_DIR': '/coc/testnvme/skareer6/Projects/junk',
+    'VIDEO_DIR': '/coc/testnvme/skareer6/Projects/junk',
+}
 
 def run_exp(exp_config: str, run_type: str, opts=None) -> None:
     r"""Runs experiment given mode and config
@@ -73,6 +79,15 @@ def run_exp(exp_config: str, run_type: str, opts=None) -> None:
     Returns:
         None.
     """
+    if 'JUNK' in opts and opts[opts.index('JUNK')+1] == 'True':
+        for k,v in PATHS_TO_JUNK.items():
+            if k in opts:
+                opts[opts.index(k)+1] = v
+            else:
+                opts.extend([k, v])
+        idx = opts.index('JUNK')
+        opts.pop(idx)
+        opts.pop(idx)
     config = get_config(exp_config, opts)
     execute_exp(config, run_type)
 

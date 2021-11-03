@@ -39,10 +39,6 @@ def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
     """
     return baseline_registry.get_env(env_name)
 
-class DummyEnv():
-    def __init__(self):
-        self.current_episode = 99 
-
 @baseline_registry.register_env(name="LocomotionRLEnv")
 class LocomotionRLEnv(habitat.RLEnv):
     def __init__(self, config: Config, dataset: Optional[Dataset] = None, *args, **kwargs):
@@ -63,7 +59,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.num_joints = config.TASK_CONFIG.TASK.ACTION.NUM_JOINTS
         self.max_rad_delta = np.deg2rad(config.TASK_CONFIG.TASK.ACTION.MAX_DEGREE_DELTA)
         self.action_space = ActionSpace({
-            "joint_targets": spaces.Box(
+            "joint_deltas": spaces.Box(
                 low=np.ones(self.num_joints) * -self.max_rad_delta,
                 high=np.ones(self.num_joints) * self.max_rad_delta,
                 dtype=np.float32,
@@ -72,15 +68,14 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.observation_space = spaces.Dict(
             {
                 "joint_pos": spaces.Box(low=np.ones(self.num_joints) * -np.pi, high=np.ones(self.num_joints) * np.pi, dtype=np.float32),
-                "joint_vel": spaces.Box(low=np.ones(self.num_joints) * -1000, high=np.ones(self.num_joints) * 1000, dtype=np.float32),
-                "euler_rot": spaces.Box(low=np.ones(3) * -np.pi, high=np.ones(3) * np.pi, dtype=np.float32)
+                # "joint_vel": spaces.Box(low=np.ones(self.num_joints) * -1000, high=np.ones(self.num_joints) * 1000, dtype=np.float32),
+                # "euler_rot": spaces.Box(low=np.ones(3) * -np.pi, high=np.ones(3) * np.pi, dtype=np.float32)
             }
         )
 
         # Create sim
         cfg = self._make_configuration()
         self._sim = habitat_sim.Simulator(cfg)
-        self._env = DummyEnv()
 
         # Place agent
         self._place_agent()
@@ -96,12 +91,12 @@ class LocomotionRLEnv(habitat.RLEnv):
         self._load_floor()
 
         # RL init
-        self.target_joint_positions = np.array([0, 0.432, -0.77, 0, 0.432, -0.77, 0, 0.432, -0.77, 0, 0.432, -0.77])
+        self.target_joint_positions = np.array([0, 0.432, -0.77, 0, 0.432, -0.77, 0, 0.432, -0.77, 0, 0.432, -0.77])[:3]
         self.number_of_episodes = 1 if self.render_freq == 1 else int(1e6) #this signifies eval mode
 
         # joint position limits
-        self.joint_limits_lower = np.array([-0.1, -np.pi/3, -5/6*np.pi] * 4)
-        self.joint_limits_upper = np.array([0.1, np.pi/2.1, -np.pi/4] * 4)
+        # self.joint_limits_lower = np.array([-0.1, -np.pi/3, -5/6*np.pi] * 4)[:3]
+        # self.joint_limits_upper = np.array([0.1, np.pi/2.1, -np.pi/4] * 4)[:3]
 
         # Initialize attributes
         self.viz_buffer = []
@@ -203,10 +198,10 @@ class LocomotionRLEnv(habitat.RLEnv):
         """ Returns sensor observation for joint positions and velocities
         """
         obs = {}
-        obs["joint_pos"] = np.array(self.robot_id.joint_positions)
-        obs["joint_vel"] = wrap_heading(np.array(self.robot_id.joint_positions) - np.array(self.last_joint_pos)) / (1 / self.sim_hz)
-        obs["euler_rot"] = self.robot.get_robot_rpy()
-        self.last_joint_pos = self.robot_id.joint_positions
+        obs["joint_pos"] = np.array(self.robot_id.joint_positions)[:3]
+        # obs["joint_vel"] = (wrap_heading(np.array(self.robot_id.joint_positions) - np.array(self.last_joint_pos)) / (1 / self.sim_hz))[:3]
+        # obs["euler_rot"] = self.robot.get_robot_rpy()
+        self.last_joint_pos = self.robot_id.joint_positions[:3]
         return obs
     
     def _step_reward(self, step_obs):
@@ -219,11 +214,11 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         # reward = -mse #negative if using MSE.  pos if using exp mse
         reward = mseexp
-        if (np.abs(step_obs["euler_rot"]) > np.deg2rad(60)).any():
-            assert(not self.fixed_base)
+        # if (np.abs(step_obs["euler_rot"]) > np.deg2rad(60)).any():
+            # assert(not self.fixed_base)
             # print("TIP PENALTY INCURRED")
             # reward -= self.task_config.REWARD.TIP_PENALTY
-            reward -= 1
+            # reward -= 1
         
         return reward
 
@@ -254,10 +249,14 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return step_obs
 
-    def step(self, action, *args, **kwargs):
+    def step(self, action, action_args, *args, **kwargs):
         """ Updates robot with given actions and calls physics sim step
         """
-        deltas = action["action_args"]["joint_deltas"]
+        # print("ACTIONS: ", action["action_args"])
+        # deltas = action["action_args"]["joint_deltas"]
+        # print("ACTION: ", action)
+        deltas = action_args["joint_deltas"]
+        assert(len(deltas) == self.num_joints)
         deltas = np.clip(deltas, -1, 1) * self.max_rad_delta
         self.episode_steps += 1
         # print("ARGS: ", args) #TODO: RM

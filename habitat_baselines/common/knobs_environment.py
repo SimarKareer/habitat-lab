@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from habitat.utils.geometry_utils import wrap_heading
 
+
 @baseline_registry.register_env(name="KnobsEnv")
 class KnobsEnv(habitat.RLEnv):
 
@@ -73,7 +74,12 @@ class KnobsEnv(habitat.RLEnv):
 
     def get_observations(self):
         return {
-            "knob_errors": wrap_heading(self.goal_state - self.current_state)
+            "knob_errors": np.array(
+                [
+                    self._get_heading_error(c, g)
+                    for c, g in zip(self.current_state, self.goal_state)
+                ]
+            )
         }
 
     def _get_random_knobs(self):
@@ -81,13 +87,20 @@ class KnobsEnv(habitat.RLEnv):
         return (np.random.rand(self.num_knobs) * 2 - 1) * np.pi
 
     def step(self, action, action_args, *args, **kwargs):
-        deltas = action_args["knob_deltas"]
 
         # Clip actions and scale
-        deltas = np.clip(deltas, -1.0, 1.0) * self.max_movement
+        action = (
+            np.clip(action_args["knob_deltas"], -1.0, 1.0) * self.max_movement
+        )
+        # action = np.ones(len(action), dtype=np.float32) * self.max_movement
 
         # Update current state
-        self.current_state = wrap_heading(self.current_state + deltas)
+        self.current_state = np.array(
+            [
+                self._validate_heading(c + a)
+                for c, a in zip(self.current_state, action)
+            ]
+        )
 
         # Return observations (error for each knob)
         observations = self.get_observations()
@@ -97,9 +110,9 @@ class KnobsEnv(habitat.RLEnv):
         reward = sum(reward_terms)
 
         # Check termination conditions
-        success = (
-            abs(observations["knob_errors"]) < self.success_thresh
-        ).all()
+        success = all(
+            [abs(i) < self.success_thresh for i in observations["knob_errors"]]
+        )
 
         self.num_steps += 1
         done = success or self.num_steps == self._max_episode_steps
@@ -115,3 +128,14 @@ class KnobsEnv(habitat.RLEnv):
         }
 
         return observations, reward, done, info
+
+    def _validate_heading(self, heading):
+        if heading > np.pi:
+            heading -= np.pi * 2
+        elif heading < -np.pi:
+            heading += np.pi * 2
+
+        return heading
+
+    def _get_heading_error(self, source, target):
+        return self._validate_heading(target - source)

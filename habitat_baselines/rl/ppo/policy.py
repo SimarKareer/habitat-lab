@@ -21,9 +21,14 @@ from habitat_baselines.rl.models.rnn_state_encoder import (
     build_rnn_state_encoder,
 )
 from habitat_baselines.rl.models.simple_cnn import SimpleCNN
-from habitat_baselines.utils.common import CategoricalNet, GaussianNet
+from habitat_baselines.utils.common import (
+    CategoricalNet,
+    GaussianNet,
+    initialized_linear,
+)
 
 import numpy as np
+
 
 class Policy(nn.Module, metaclass=abc.ABCMeta):
     def __init__(self, net, dim_actions, policy_config=None):
@@ -140,7 +145,6 @@ class LocomotionBaselinePolicy(Policy):
         observation_space: spaces.Dict,
         action_space,
         mlp_hidden_sizes: list,
-        hidden_size: int = 512,
         num_recurrent_layers: int = 3,
         policy_config=None,
         **kwargs,
@@ -152,7 +156,6 @@ class LocomotionBaselinePolicy(Policy):
         super().__init__(
             LocomotionBaselineNet(  # type: ignore
                 observation_space=observation_space,
-                hidden_size=hidden_size,
                 num_recurrent_layers=num_recurrent_layers,
                 mlp_hidden_sizes=mlp_hidden_sizes,
                 **kwargs,
@@ -161,20 +164,17 @@ class LocomotionBaselinePolicy(Policy):
             policy_config=policy_config,
         )
 
-        # Need to make a module that extracts data from a TensorDict
+        # Need to make a module that extracts/flattens data from a TensorDict
         extract_observation_values = nn.Module()
         extract_observation_values.forward = lambda x: torch.cat(
             list(x.values()),
             dim=1,
         )
-        layers = [
+        self.critic.fc = nn.Sequential(
             extract_observation_values,
             construct_mlp(self.net.non_visual_size, mlp_hidden_sizes),
-            nn.Linear(mlp_hidden_sizes[-1], 1),
-        ]
-        nn.init.orthogonal_(layers[-1].weight, gain=np.sqrt(2))
-        nn.init.constant_(layers[-1].bias, 0)
-        self.critic.fc = nn.Sequential(*layers)
+            initialized_linear(mlp_hidden_sizes[-1], 1, gain=np.sqrt(2)),
+        )
         self.critic_is_head = False
 
     @classmethod
@@ -185,7 +185,6 @@ class LocomotionBaselinePolicy(Policy):
             observation_space=observation_space,
             action_space=action_space,
             mlp_hidden_sizes=config.RL.PPO.mlp_hidden_sizes,
-            hidden_size=config.RL.PPO.hidden_size,
             num_recurrent_layers=config.RL.DDPPO.num_recurrent_layers,
             policy_config=config.RL.POLICY,
         )
@@ -219,11 +218,12 @@ def construct_mlp(input_size, mlp_hidden_sizes):
     # Stack of Linear and ReLUs
     for hidden_units in mlp_hidden_sizes:
         layers.append(
-            nn.Linear(previous_hidden_units, hidden_units)
+            initialized_linear(
+                previous_hidden_units, hidden_units, gain=np.sqrt(2)
+            )
         )
-        nn.init.orthogonal_(layers[-1].weight, gain=np.sqrt(2))
-        nn.init.constant_(layers[-1].bias, 0)
-        layers.append(nn.ReLU())
+        # layers.append(nn.ReLU())
+        layers.append(nn.Tanh())
         previous_hidden_units = hidden_units
 
     return nn.Sequential(*layers)
@@ -239,7 +239,6 @@ class LocomotionBaselineNet(Net):
     def __init__(
         self,
         observation_space: spaces.Dict,
-        hidden_size: int,
         num_recurrent_layers: int,
         mlp_hidden_sizes: list,
     ):
@@ -250,14 +249,7 @@ class LocomotionBaselineNet(Net):
             [v.shape[0] for v in observation_space.spaces.values()]
         )
 
-        self._hidden_size = hidden_size
-
-        # Can't delete this... RolloutStorage uses this to know hidden size.
-        self.state_encoder = build_rnn_state_encoder(
-            self.non_visual_size,
-            hidden_size=self._hidden_size,
-            num_layers=num_recurrent_layers,
-        )
+        self.num_dummy_recurrent_layers = num_recurrent_layers
 
         self._mlp_output_size = mlp_hidden_sizes[-1]
         self.mlp = construct_mlp(self.non_visual_size, mlp_hidden_sizes)
@@ -274,20 +266,12 @@ class LocomotionBaselineNet(Net):
 
     @property
     def num_recurrent_layers(self):
-        return self.state_encoder.num_recurrent_layers
+        return self.num_dummy_recurrent_layers
 
     def forward(self, observations, rnn_hidden_states, prev_actions, masks):
         x = list(observations.values())
         x_out = torch.cat(x, dim=1)
         x_out = self.mlp(x_out)
-
-        # Dummy hidden state
-        rnn_hidden_states = torch.zeros(
-            x_out.shape[0],  # number of environments
-            self.state_encoder.num_recurrent_layers,
-            self._hidden_size,
-            device=x_out.device,
-        )
 
         return x_out, rnn_hidden_states
 

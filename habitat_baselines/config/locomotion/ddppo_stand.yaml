@@ -1,5 +1,5 @@
 VERBOSE: False
-BASE_TASK_CONFIG_PATH: "configs/tasks/locomotion_stand.yaml"
+BASE_TASK_CONFIG_PATH: "/private/home/naokiyokoyama/loco/habitat-lab/configs/tasks/locomotion_stand.yaml"
 TRAINER_NAME: "ddppo"
 ENV_NAME: "LocomotionRLEnv"
 SIMULATOR_GPU_ID: 0
@@ -29,15 +29,17 @@ RL:
     action_distribution_type: "gaussian"
   PPO:
     # ppo params
+    loss_type: regular
     clip_param: 0.2
     ppo_epoch: 4
     num_mini_batch: 4
     value_loss_coef: 0.5
+    expressive_action_loss_coef: 1.0
     entropy_coef: 0.01
-    lr: 0.001
+    lr: 0.0001
     eps: 1e-5
     max_grad_norm: 0.5
-    num_steps: 512
+    num_steps: 256
     use_gae: True
     gamma: 0.99
     tau: 0.95
@@ -48,6 +50,7 @@ RL:
     use_normalized_advantage: False
 
     hidden_size: 256
+    mlp_hidden_sizes: [512, 512, 512]
 
     # Use double buffered sampling, typically helps
     # when environment time is similar or large than

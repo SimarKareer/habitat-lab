@@ -1,5 +1,5 @@
 VERBOSE: False
-BASE_TASK_CONFIG_PATH: "configs/tasks/knobs.yaml"
+BASE_TASK_CONFIG_PATH: "/private/home/naokiyokoyama/loco/habitat-lab/configs/tasks/knobs.yaml"
 TRAINER_NAME: "ddppo"
 ENV_NAME: "KnobsEnv"
 SIMULATOR_GPU_ID: 0
@@ -29,10 +29,13 @@ RL:
     action_distribution_type: "gaussian"
   PPO:
     # ppo params
+    loss_type: regular
+    use_q: ''
     clip_param: 0.2
     ppo_epoch: 4
     num_mini_batch: 4
     value_loss_coef: 0.5
+    expressive_action_loss_coef: 0.0
     entropy_coef: 0.01
     lr: 0.0001
     eps: 0.00001
@@ -47,8 +50,8 @@ RL:
 
     use_normalized_advantage: True
 
-    hidden_size: 256
-    mlp_hidden_sizes: [128, 64]
+    hidden_size: 512
+    mlp_hidden_sizes: [512, 512, 512]
 
     # Use double buffered sampling, typically helps
     # when environment time is similar or large than

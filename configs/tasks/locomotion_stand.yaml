@@ -2,7 +2,7 @@ ENVIRONMENT:
   MAX_EPISODE_STEPS: 500
   SUCCESS_THRESH: 5
 SIMULATOR:
-  ROBOT_URDF: data/URDF_demo_assets/aliengo/urdf/aliengo.urdf
+  ROBOT_URDF: /private/home/naokiyokoyama/loco/habitat-lab/data/URDF_demo_assets/aliengo/urdf/aliengo.urdf
   CTRL_HZ: 30
   SIM_HZ: 120
   SETTLE_TIME: 20
@@ -14,7 +14,7 @@ DEBUG:
 TASK:
   ACTION:
     NUM_JOINTS: 12
-    MAX_DEGREE_DELTA: 2 # in degrees
+    MAX_DEGREE_DELTA: 5 # in degrees
   START:
     CALF: -2.5
     THIGH: 1.3

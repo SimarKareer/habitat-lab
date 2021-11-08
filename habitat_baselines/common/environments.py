@@ -29,6 +29,7 @@ from habitat_sim.physics import JointMotorSettings
 from copy import copy
 import math
 import torch
+from collections import defaultdict, OrderedDict
 
 from habitat.utils.geometry_utils import wrap_heading
 
@@ -247,7 +248,7 @@ class AlienGo:
 
 @baseline_registry.register_env(name="LocomotionRLEnv")
 class LocomotionRLEnv(habitat.RLEnv):
-    def __init__(self, config: Config, *args, **kwargs):
+    def __init__(self, config: Config, render=False, *args, **kwargs):
         self.config = config
         self.sim_config = config.TASK_CONFIG.SIMULATOR
         self.task_config = config.TASK_CONFIG.TASK
@@ -318,7 +319,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.target_joint_positions = np.array([0, 0.432, -0.77] * 4)
 
         # Initialize attributes
-        self.render = False
+        self.render = render
         self.viz_buffer = []
         self.num_steps = 0
         self._max_episode_steps = (
@@ -335,6 +336,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.ctrl_hz = self.sim_config.CTRL_HZ
         self.number_of_episodes = int(1e24)  # needed b/c habitat wants it
         self.goal_height = 0.486
+        self.accumulated_reward_info = defaultdict(float)
 
     def reset(self):
         self.robot.reset()
@@ -345,6 +347,7 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         self.viz_buffer = []
         self.num_steps = 0
+        self.accumulated_reward_info = defaultdict(float)
 
         return self.get_observations()
 
@@ -356,17 +359,41 @@ class LocomotionRLEnv(habitat.RLEnv):
             "feet_contact": self.robot.get_feet_contacts(),
         }
 
-    def get_reward(self, observations):
+    def get_reward_terms(self, observations) -> np.array:
+        reward_terms = OrderedDict()
+
         # Penalize roll and pitch
-        reward = -np.sum(np.abs(observations['euler_rot'][:2]))
+        reward_terms["roll_pitch_penalty"] = -np.abs(
+            observations["euler_rot"][:2]
+        )
 
         # Penalize non-contacting feet
-        reward -= np.sum(1 - observations['feet_contact'])
+        reward_terms["contact_feet_penalty"] = observations["feet_contact"] - 1
 
         # Penalize deviation from desired height
-        reward -= np.abs(self.robot.height - self.goal_height)
+        reward_terms["height_penalty"] = [
+            -np.abs(self.robot.height - self.goal_height)
+        ]
 
-        return reward
+        # Penalize deviations from nominal standing pose (MSE)
+        reward_terms["imitation_reward"] = (
+            -wrap_heading(
+                self.robot.joint_positions - self.target_joint_positions
+            )
+            ** 2
+            / self.num_joints
+        )
+
+        # Log accumulated reward info
+        for k, v in reward_terms.items():
+            self.accumulated_reward_info["cumul_" + k] += np.sum(v)
+
+        # Return just the values
+        reward_terms = np.concatenate(list(reward_terms.values())).astype(
+            np.float32
+        )
+
+        return reward_terms
 
     def step(self, action, action_args, *args, **kwargs):
         """Updates robot with given actions and calls physics sim step"""
@@ -375,7 +402,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         # Clip actions and scale
         deltas = np.clip(deltas, -1.0, 1.0) * self.max_rad_delta
 
-        """ Hack below! Overwrite actions to always do something successful """
+        """ Hack below! Overwrite actions to always be successful """
         USE_HACK = False
         if USE_HACK:
             deltas = []
@@ -396,22 +423,38 @@ class LocomotionRLEnv(habitat.RLEnv):
         # Update current state
         self.robot.add_jms_pos(deltas)
         self._sim.step_physics(1.0 / self.sim_hz)
+        if self.render:
+            self.viz_buffer.append(self._sim.get_sensor_observations())
 
         # Return observations (error for each knob)
         observations = self.get_observations()
 
         # Get reward
-        reward = self.get_reward(observations)
+        reward_terms = self.get_reward_terms(observations)
+        reward = sum(reward_terms)
 
         # Check termination conditions
         success = abs(self.robot.height - self.goal_height) < 0.05
         self.num_steps += 1
         done = self.num_steps == self._max_episode_steps
+        if done:
+            vut.make_video(
+                self.viz_buffer,
+                "rgba_camera",
+                "color",
+                "test.mp4",
+                open_vid=False,
+            )
 
         # Populate info for tensorboard
         info = {
             "success": 1.0 if success else 0.0,
+            "height": self.robot.height,
+            "reward_terms": reward_terms,
         }
+
+        # Add info about how much of each reward component has accumulated
+        info.update(self.accumulated_reward_info)
 
         return observations, reward, done, info
 
@@ -474,7 +517,6 @@ class LocomotionRLEnv(habitat.RLEnv):
     def seed(self, seed):
         torch.manual_seed(seed)
         np.random.seed(seed)
-
 
 
 @baseline_registry.register_env(name="RearrangeRLEnv")

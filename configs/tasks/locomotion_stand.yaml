@@ -2,12 +2,12 @@ ENVIRONMENT:
   MAX_EPISODE_STEPS: 500
   SUCCESS_THRESH: 5
 SIMULATOR:
-  ROBOT_URDF: /private/home/naokiyokoyama/loco/habitat-lab/data/URDF_demo_assets/aliengo/urdf/aliengo.urdf
+  ROBOT_URDF: /nethome/skareer6/flash/Projects/InverseKinematics/habitat-lab/data/URDF_demo_assets/aliengo/urdf/aliengo.urdf
   CTRL_HZ: 30
-  SIM_HZ: 120
+  SIM_HZ: 30
   SETTLE_TIME: 20
 DEBUG:
-  FIXED_BASE: True
+  FIXED_BASE: False
   VIDEO_FREQ: 1000 # None if you don't want any videos
   RENDER_OVERRIDE: False
 

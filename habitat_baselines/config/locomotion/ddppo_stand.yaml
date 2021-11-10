@@ -2,7 +2,7 @@ VERBOSE: False
 # BASE_TASK_CONFIG_PATH: "/private/home/naokiyokoyama/loco/habitat-lab/configs/tasks/locomotion_stand.yaml"
 BASE_TASK_CONFIG_PATH: /nethome/skareer6/flash/Projects/InverseKinematics/habitat-lab/configs/tasks/locomotion_stand.yaml
 TRAINER_NAME: "ddppo"
-ENV_NAME: "LocomotionRLEnv"
+ENV_NAME: "LocomotionRLEnvStand"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
 VIDEO_OPTION: []

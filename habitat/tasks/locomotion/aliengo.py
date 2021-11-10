@@ -1,10 +1,8 @@
-import numpy as np
-
-from habitat_baselines.common.baseline_registry import baseline_registry
-import magnum as mn
-from habitat_sim.physics import JointMotorSettings
-from copy import copy
 import math
+import magnum as mn
+import numpy as np
+from habitat_sim.physics import JointMotorSettings
+
 
 from habitat.utils.geometry_utils import wrap_heading
 
@@ -97,33 +95,26 @@ class AlienGo:
             1.0,  # max_impulse
         )
 
-    def prone(self):
-        # Bend legs
-        calfDofs = [2, 5, 8, 11]
-        pose = np.zeros(12, dtype=np.float32)
-        for dof in calfDofs:
-            pose[dof] = self.task_config.START.CALF  # second joint
-            pose[dof - 1] = self.task_config.START.THIGH  # first joint
-
+    def set_pose_jms(self, pose):
+        f""" Sets a robot's pose and changes the jms to that pose (rests at given position)
+        """
         # Snap joints kinematically
         self.robot_id.joint_positions = pose
 
         # Make motor controllers maintain this position
         for idx, p in enumerate(pose):
             self.robot_id.update_joint_motor(idx, self._new_jms(p))
+
+    def prone(self):
+        self.set_pose_jms(np.array([0, 0.432, -0.77] * 4))
         
     def stand(self):
-        # Bend legs
-        pose = np.array([0, 0.432, -0.77] * 4)
-
-        # Snap joints kinematically
-        self.robot_id.joint_positions = pose
-
-        # Make motor controllers maintain this position
-        for idx, p in enumerate(pose):
-            self.robot_id.update_joint_motor(idx, self._new_jms(p))
+        self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
 
     def reset(self):
+        f"""
+            Reset's all the robots movemement, moves it back to center of platform, 
+        """
         # Zero out the link and root velocities
         self.robot_id.clear_joint_states()
         self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
@@ -143,12 +134,12 @@ class AlienGo:
         self.robot_id.transformation = base_transform
 
         # Reset all jms
-        base_jms = self._new_jms(0)
-        for i in range(12):
-            self.robot_id.update_joint_motor(i, base_jms)
+        # base_jms = self._new_jms(0)
+        # for i in range(12):
+        #     self.robot_id.update_joint_motor(i, base_jms)
 
-        self._set_joint_type_pos("thigh", self.task_config.START.THIGH)
-        self._set_joint_type_pos("calf", self.task_config.START.CALF)
+        # self._set_joint_type_pos("thigh", self.task_config.TASK.START.THIGH)
+        # self._set_joint_type_pos("calf", self.task_config.TASK.START.CALF)
 
     def _set_joint_type_pos(self, joint_type, joint_pos):
         """Sets all joints of a given type to a given position

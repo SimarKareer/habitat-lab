@@ -9,7 +9,7 @@ SIMULATOR:
 DEBUG:
   FIXED_BASE: False
   VIDEO_FREQ: 1000 # None if you don't want any videos
-  RENDER_OVERRIDE: False
+  BASELINE_POLICY: False
 
 TASK:
   ACTION:

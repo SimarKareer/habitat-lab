@@ -7,7 +7,7 @@ SIMULATOR:
   SIM_HZ: 30
   SETTLE_TIME: 20
 DEBUG:
-  FIXED_BASE: False
+  FIXED_BASE: True
   VIDEO_FREQ: 1000 # None if you don't want any videos
   BASELINE_POLICY: False
 
@@ -19,7 +19,10 @@ TASK:
     CALF: -2.5
     THIGH: 1.3
   REWARD:
-    TIP_PENALTY: 1
+    a1: 0.04
+    a2: 20
+    alive: 20 #Apparently 20 * target_vel?
+  TARGET_VELOCITY: 1
 DATASET:
   TYPE: ""
   CONTENT_SCENES: []

@@ -12,27 +12,174 @@ in habitat. Customized environments should be registered using
 
 from typing import Optional, Type
 import numpy as np
+import magnum as mn
+import cv2
+import os
 
 import habitat
 from habitat import Config, Dataset
 
+from habitat.tasks.locomotion.locomotion_base_env import LocomotionRLEnv
 from collections import defaultdict, OrderedDict
 
-from habitat.tasks.locomotion.locomotion_base_env import LocomotionRLEnv
 from habitat.utils.geometry_utils import wrap_heading
 from habitat_baselines.common.baseline_registry import baseline_registry
+import habitat_sim.utils.viz_utils as vut
 
 
-def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
-    r"""Return environment class based on name.
+@baseline_registry.register_env(name="LocomotionRLEnvEnergy")
+class LocomotionRLEnvEnergy(LocomotionRLEnv):
+    def __init__(self, config: Config, render=False, *args, **kwargs):
+        super().__init__(config, render=render, args=args, kwargs=kwargs)
+        self.target_velocity = np.array(
+            [self.task_config.TASK.TARGET_VELOCITY, 0, 0]
+        )
+        self.target_forward_velocity = self.task_config.TASK.TARGET_VELOCITY
+        self.rewards = self.task_config.TASK.REWARD
+        self.time_step = self._sim.get_physics_time_step()
 
-    Args:
-        env_name: name of the environment.
+        print("HEREEEE")
 
-    Returns:
-        Type[habitat.RLEnv]: env class.
-    """
-    return baseline_registry.get_env(env_name)
+    def _task_reset(self):
+        self.robot.reset()
+        self.robot.stand()
+
+    def _get_success(self):
+        return (
+            (self.robot.robot_id.root_linear_velocity - self.target_velocity)
+            < 0.1
+        ).all()
+        # self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
+    
+    def image_text(self, img):
+        vxr = self.named_rewards["forward_velocity_reward"][0]
+        vyr = self.named_rewards["side_velocity_reward"][0]
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"vx reward: {vxr:.3f} vy reward: {vyr:.3f}",  # text
+            (20, 90),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+
+        vx = self.robot.forward_velocity
+        vy = self.robot.side_velocity
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"vx: {vx:.3f} vy: {vy:.3f}",  # text
+            (20, 130),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+
+        angr = self.named_rewards["angular_velocity_reward"][0]
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"angular vel reward: {angr:.3f}",  # text
+            (20, 170),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+        
+        wx, wy, wz = self.robot.robot_id.root_angular_velocity
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"angular vel: {wx:.1f}, {wy:.1f}, {wz:.1f}",  # text
+            (20, 210),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+        energy = self.named_rewards["energy_reward"][0]
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"energy reward: {energy:.1f}",  # text
+            (20, 250),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+
+        return img
+
+    def _get_reward_terms(self, observations) -> np.array:
+        reward_terms = OrderedDict()
+
+        reward_terms["forward_velocity_reward"] = np.array(
+            [
+                -self.rewards.a2 * np.abs(
+                    self.robot.forward_velocity - self.target_forward_velocity
+                )
+            ]
+        )
+        reward_terms["side_velocity_reward"] = np.array(
+            [-self.robot.side_velocity ** 2]
+        )
+        reward_terms["angular_velocity_reward"] = np.array(
+            [-self.robot.robot_id.root_angular_velocity[1] ** 2]
+        )
+
+
+        # r, p, y = np.abs(self.robot.get_rpy())
+        # reward_terms["balance_reward"] = np.array(
+        #     [
+        #         self.rewards.wux * r
+        #         + self.rewards.wuy * p
+        #         + self.rewards.wuz * y
+        #     ]
+        # )
+
+        # print("POS: ", self.robot.position)
+        # _, _, zpos = self.robot.position
+        # reward_terms["sideways_reward"] = np.array([-np.abs(zpos)])
+        # reward_terms["alive"] = np.array([self.rewards.alive])
+        # reward_terms["energy"] = np.array(
+        #     [
+        #         -self.rewards.we
+        #         * np.linalg.norm(self.robot.robot_id.joint_forces)
+        #     ]
+        # )
+        # print("REWARD TERMS: ", reward_terms)
+
+        # print("TORQUE: ", self.robot.joint_torques)
+        # print("VEL: ", self.robot.joint_velocities)
+
+        reward_terms["energy_reward"] = np.array([
+            -self.robot.joint_torques().dot(self.robot.joint_velocities)
+        ])
+
+        reward_terms["alive_reward"] = np.array([
+            self.rewards.alive
+        ])
+        self.named_rewards = reward_terms
+
+        # Log accumulated reward info
+        for k, v in reward_terms.items():
+            self.accumulated_reward_info["cumul_" + k] += np.sum(v)
+
+        # Return just the values
+        reward_terms = np.concatenate(list(reward_terms.values())).astype(
+            np.float32
+        )
+
+        return reward_terms
+    
+    def add_force(self, fx, fy, fz, link=0):
+        self.robot.robot_id.add_link_force(link, mn.Vector3(fx, fy, fz))
+    # def force_adjustment(self, kp, kd):
+    #     forward_force = kp * (self.target_forward_velocity - self.robot.forward_velocity) #TODO add derivative term as well
+    #     self.robot.robot_id.add_link_force(0, mn.Vector3(forward_force, 0, 0))
+        
+    #     side_force = kp * (-self.robot.position[2]) + kd * (-self.robot.side_velocity)
+    #     self.robot.robot_id.add_link_force(0, mn.Vector3(0, 0, side_force))
 
 
 @baseline_registry.register_env(name="LocomotionRLEnvStand")
@@ -40,13 +187,13 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
     def __init__(self, config: Config, render=False, *args, **kwargs):
         super().__init__(config, render=render, args=args, kwargs=kwargs)
         # The following represents a standing pose:
-        self.target_joint_positions = np.array([0, 0.432, -0.77] * 4)
+        self.target_joint_positions = np.array([0, 0.8, -1.5] * 4)
         self.use_exp_mse = self.config.RL.use_exp_mse
         self.goal_height = 0.486
 
     def _task_reset(self):
         self.robot.reset()
-        self.robot.stand()
+        self.robot.prone()
 
     def _baseline_policy(self):
         f""" Task Specific policy which produces actions that should maximize reward for debug purposes 
@@ -193,3 +340,15 @@ class NavRLEnv(habitat.RLEnv):
 
     def get_info(self, observations):
         return self.habitat_env.get_metrics()
+
+
+def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
+    r"""Return environment class based on name.
+
+    Args:
+        env_name: name of the environment.
+
+    Returns:
+        Type[habitat.RLEnv]: env class.
+    """
+    return baseline_registry.get_env(env_name)

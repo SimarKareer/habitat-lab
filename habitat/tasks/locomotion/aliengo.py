@@ -46,6 +46,32 @@ class AlienGo:
     @property
     def joint_positions(self) -> np.ndarray:
         return np.array(self.robot_id.joint_positions, dtype=np.float32)
+    
+    @property
+    def forward_velocity(self) -> float:
+        return self.robot_id.root_linear_velocity[0]
+
+    @property
+    def side_velocity(self) -> float:
+        return self.robot_id.root_linear_velocity[2]
+    
+    @property
+    def position(self) -> np.ndarray:
+        return self.robot_id.transformation.translation
+    
+    def joint_torques(self) -> np.ndarray:
+        # print("OG TORQUE: ", self.robot_id.joint_forces)
+        # print("IN HEREEEEE")
+        phys_ts = self._sim.get_physics_time_step()
+        print(type(phys_ts))
+        print("PHYSICS TS: ", phys_ts)
+        py_torques = self.robot_id.get_joint_motor_torques(phys_ts)
+        torques = np.array(py_torques, dtype=np.float32)
+        off_indices = (np.array([0, 4, 8, 12]), )
+        assert((torques[off_indices] == 0).all())
+        on_indices = (np.array([1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]), )
+        torques = torques[on_indices]
+        return torques[:12]
 
     def set_joint_positions(self, pose):
         """This is kinematic! Not dynamic."""
@@ -106,10 +132,10 @@ class AlienGo:
             self.robot_id.update_joint_motor(idx, self._new_jms(p))
 
     def prone(self):
-        self.set_pose_jms(np.array([0, 0.432, -0.77] * 4))
-        
-    def stand(self):
         self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
+    
+    def stand(self):
+        self.set_pose_jms(np.array([0, 0.432, -0.77] * 4))
 
     def reset(self):
         f"""
@@ -129,7 +155,7 @@ class AlienGo:
         base_transform.translation = (
             mn.Vector3(0.0, 0.8, 0.0)
             if self.fixed_base
-            else mn.Vector3(0.0, 0.3, 0.0)
+            else mn.Vector3(0.0, 0.5, 0.0)
         )
         self.robot_id.transformation = base_transform
 
@@ -186,6 +212,9 @@ class AlienGo:
         roll, pitch, yaw = self._euler_from_quaternion(x, y, z, w)
         rpy = wrap_heading(np.array([roll, pitch, yaw]))
         return rpy
+    
+    def get_rp(self):
+        return self.get_rpy()[:2]
 
     def _euler_from_quaternion(self, x, y, z, w):
         """

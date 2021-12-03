@@ -58,7 +58,7 @@ class LocomotionRLEnv(habitat.RLEnv):
                     dtype=np.float32,
                 ),
                 "euler_rot": spaces.Box(
-                    low=-np.pi, high=np.pi, shape=(3,), dtype=np.float32,
+                    low=-np.pi, high=np.pi, shape=(2,), dtype=np.float32,
                 ),
                 "feet_contact": spaces.Box(
                     low=0, high=1, shape=(4,), dtype=np.float32,
@@ -112,6 +112,9 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.accumulated_reward_info = defaultdict(float)
 
         return self._get_observations()
+    
+    def image_text(self, img):
+        return img
 
     def step(self, action, action_args, *args, **kwargs):
         """Updates robot with given actions and calls physics sim step"""
@@ -137,17 +140,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         if self.render:
             self.viz_buffer.append(self._sim.get_sensor_observations())
             # print(self.viz_buffer[-1])
-            self.viz_buffer[-1]["rgba_camera"] = cv2.putText(
-                self.viz_buffer[-1][
-                    "rgba_camera"
-                ],  # numpy array on which text is written
-                f"Reward: {reward:.3f}",  # text
-                (20, 90),  # position at which writing has to start
-                cv2.FONT_HERSHEY_SIMPLEX,  # font family
-                0.75,  # font size
-                (255, 255, 255, 255),  # font color
-                3,  # font stroke
-            )
+            self.viz_buffer[-1]["rgba_camera"] = self.image_text(self.viz_buffer[-1]["rgba_camera"])
 
         # Check termination conditions
         self.num_steps += 1
@@ -187,7 +180,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         return {
             "joint_pos": self.robot.joint_positions,
             "joint_vel": self.robot.joint_velocities,
-            "euler_rot": self.robot.get_rpy(),
+            "euler_rot": self.robot.get_rp(),
             "feet_contact": self.robot.get_feet_contacts(),
         }
 

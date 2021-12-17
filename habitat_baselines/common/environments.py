@@ -32,7 +32,7 @@ import torch
 from collections import defaultdict, OrderedDict
 
 from habitat.utils.geometry_utils import wrap_heading
-
+from habitat_sim.utils.common import quat_from_magnum
 
 def get_env_class(env_name: str) -> Type[habitat.RLEnv]:
     r"""Return environment class based on name.
@@ -78,6 +78,11 @@ class AlienGo:
     def height(self):
         # Translation is [y, z, x]
         return self.robot_id.rigid_state.translation[1]
+
+    @property
+    def translation(self):
+        # Translation is [y, z, x]
+        return self.robot_id.rigid_state.translation
 
     @property
     def joint_velocities(self) -> np.ndarray:
@@ -302,9 +307,6 @@ class LocomotionRLEnv(habitat.RLEnv):
         # Create simulator
         self._sim = self.create_sim()
 
-        # Place agent (for now, this is just a camera)
-        self._place_agent()
-
         # Load the robot into the sim
         self.fixed_base = False
         ao_mgr = self._sim.get_articulated_object_manager()
@@ -314,6 +316,9 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.robot = AlienGo(
             robot_id, self._sim, self.fixed_base, self.task_config
         )
+
+        # Place agent (for now, this is just a camera)
+        self._sim.initialize_agent(0, self.position_camera())
 
         # The following represents a standing pose:
         self.target_joint_positions = np.array([0, 0.432, -0.77] * 4)
@@ -371,9 +376,9 @@ class LocomotionRLEnv(habitat.RLEnv):
         reward_terms["contact_feet_penalty"] = observations["feet_contact"] - 1
 
         # Penalize deviation from desired height
-        reward_terms["height_penalty"] = [
-            -np.abs(self.robot.height - self.goal_height)
-        ]
+        # reward_terms["height_penalty"] = [
+        #     -np.abs(self.robot.height - self.goal_height)
+        # ]
 
         # Penalize deviations from nominal standing pose (MSE)
         reward_terms["imitation_reward"] = (
@@ -424,6 +429,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.robot.add_jms_pos(deltas)
         self._sim.step_physics(1.0 / self.sim_hz)
         if self.render:
+            self._sim.agents[0].set_state(self.position_camera())
             self.viz_buffer.append(self._sim.get_sensor_observations())
 
         # Return observations (error for each knob)
@@ -443,6 +449,7 @@ class LocomotionRLEnv(habitat.RLEnv):
                 "rgba_camera",
                 "color",
                 "test.mp4",
+                fps=self.sim_hz,
                 open_vid=False,
             )
 
@@ -458,15 +465,26 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return observations, reward, done, info
 
-    def _place_agent(self):
-        """Places our camera agent in a spot it can see the robot"""
-        # place our agent in the scene
+    def position_camera(self, move_with_robot=False):
+        """Place camera at fixed offset from robot always pointed at robot"""
+        offset = self.robot.translation
+        if not move_with_robot:
+            offset *= np.array([0.0, 1.0, 0.0])
+        agent_position = offset + np.array([-1.1, 0.1, 1.1])
+        agent_transformation = mn.Matrix4.look_at(
+            agent_position,
+            self.robot.translation,
+            mn.Vector3(0.0, 1.0, 0.0),  # unit vector towards positive z axis
+        )
         agent_state = habitat_sim.AgentState()
-        agent_state.position = [-1.1, 0.5, 1.1]
-        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-40), 0.0)
-        agent = self._sim.initialize_agent(0, agent_state)
+        agent_state.position = agent_position
+        agent_mn_quaternion = mn.Quaternion.from_matrix(
+            agent_transformation.rotation()
+        )
+        agent_state.rotation = quat_from_magnum(agent_mn_quaternion)
 
-        return agent.scene_node.transformation_matrix()
+        return agent_state
+
 
     def create_sim(self):
         # Simulator configuration

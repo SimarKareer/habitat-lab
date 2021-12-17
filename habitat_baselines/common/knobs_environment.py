@@ -139,3 +139,110 @@ class KnobsEnv(habitat.RLEnv):
 
     def _get_heading_error(self, source, target):
         return self._validate_heading(target - source)
+
+
+@baseline_registry.register_env(name="VectorKnobsEnv")
+class VectorKnobsEnv(habitat.RLEnv):
+
+    """Agent has to move knobs to goal positions!"""
+
+    def __init__(self, config=None, num_environments=1, device="cpu"):
+        self.env_config = config.TASK_CONFIG.ENVIRONMENT
+        self.num_knobs = self.env_config.NUM_KNOBS
+        self.success_thresh = np.deg2rad(self.env_config.SUCCESS_THRESH)
+        self._max_episode_steps = self.env_config.MAX_STEPS
+
+        # Create action space
+        self.max_movement = np.deg2rad(self.env_config.MAX_MOVEMENT)
+        # Agent has an action for each knob, (how much each knob is changed by)
+        self.action_space = spaces.Box(
+            low=-self.max_movement,
+            high=self.max_movement,
+            shape=(self.num_knobs,),
+            dtype=np.float32,
+        )
+
+        # Create observation space
+        # Agent is given the current angle difference of each knob (-180 - 180)
+        self.observation_space = spaces.Box(
+            low=-np.pi,
+            high=np.pi,
+            shape=(self.num_knobs,),
+            dtype=np.float32,
+        )
+
+        self.device = device
+        self.num_environments = num_environments
+        self.current_state = self._get_random_knobs()
+        self.goal_state = self._get_random_knobs()
+        self.num_steps = torch.zeros(
+            num_environments, dtype=torch.long, device=self.device
+        )
+        self.cumul_reward = torch.zeros(num_environments, device=self.device)
+
+    def reset(self):
+        return self.get_observations()
+
+    def get_observations(self):
+        return wrap_heading(self.goal_state - self.current_state)
+
+    def _get_random_knobs(self):
+        # (0, 1) -> (0, 2) -> (-1, 1) -> (-np.pi, np.pi)
+        return (
+            torch.rand(
+                self.num_environments, self.num_knobs, device=self.device
+            )
+            * 2
+            - 1
+        ) * np.pi
+
+    def step(self, actions):
+
+        # Clip actions and scale
+        actions = torch.clip(actions, -1.0, 1.0) * self.max_movement
+
+        # Update current state
+        self.current_state = wrap_heading(self.current_state + actions)
+
+        # Return observations (error for each knob)
+        observations = self.get_observations()
+
+        # Penalize MSE between current and goal states
+        reward_terms = -torch.pow(observations, 2) / self.num_knobs
+        rewards = torch.sum(reward_terms, dim=1)
+
+        # Check termination conditions
+        successes = (
+            torch.max(torch.abs(observations), dim=1)[0] < self.success_thresh
+        )
+
+        self.num_steps += 1
+        dones = torch.bitwise_or(
+            self.num_steps == self._max_episode_steps,
+            successes,
+        )
+
+        self.cumul_reward += rewards
+
+        infos = {
+            "success": successes.cpu().numpy(),
+            "reward_terms": reward_terms.detach(),
+            "cumul_reward": self.cumul_reward.cpu().numpy(),
+        }
+
+        # Reset finished environments
+        self.current_state = torch.where(
+            dones.unsqueeze(1).repeat(1, self.num_knobs),
+            self._get_random_knobs(),
+            self.current_state,
+        )
+
+        self.goal_state = torch.where(
+            dones.unsqueeze(1).repeat(1, self.num_knobs),
+            self._get_random_knobs(),
+            self.goal_state,
+        )
+        self.num_steps *= torch.logical_not(dones)
+        self.cumul_reward *= torch.logical_not(dones)
+
+        return (observations.detach(), rewards.detach(), dones.detach(), infos)

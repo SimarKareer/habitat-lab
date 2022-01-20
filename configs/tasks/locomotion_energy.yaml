@@ -7,14 +7,14 @@ SIMULATOR:
   SIM_HZ: 30
   SETTLE_TIME: 20
 DEBUG:
-  FIXED_BASE: True
-  VIDEO_FREQ: 1000 # None if you don't want any videos
+  FIXED_BASE: False
   BASELINE_POLICY: False
 
 TASK:
   ACTION:
     NUM_JOINTS: 12
-    MAX_DEGREE_DELTA: 5 # in degrees
+    MAX_DEGREE_DELTA: 10 # in degrees
+    TYPE: absolute
   START:
     CALF: -2.5
     THIGH: 1.3
@@ -22,7 +22,7 @@ TASK:
     a1: 0.04
     a2: 20
     alive: 20 #Apparently 20 * target_vel?
-  TARGET_VELOCITY: 1
+  TARGET_VELOCITY: 0.375
 DATASET:
   TYPE: ""
   CONTENT_SCENES: []

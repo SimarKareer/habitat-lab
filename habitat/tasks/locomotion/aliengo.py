@@ -34,6 +34,11 @@ class AlienGo:
         )
         self.joint_limits_upper = np.array([0.1, np.pi / 2.1, -np.pi / 4] * 4)
 
+        self.standing_pos = np.array([0, 0.432, -0.77] * 4)
+        self.joint_limits_energy = np.array([0.15, 0.4, 0.4] * 4)
+        # self.joint_limits_upper_energy = np.array([0.15, 0.4, 0.4] * 4)
+
+
     @property
     def height(self):
         # Translation is [y, z, x]
@@ -48,24 +53,50 @@ class AlienGo:
         return np.array(self.robot_id.joint_positions, dtype=np.float32)
     
     @property
+    def velocity(self) -> mn.Vector3:
+        """
+        velocity in global frame
+        """
+        return self.robot_id.root_linear_velocity
+
+    @property
     def forward_velocity(self) -> float:
-        return self.robot_id.root_linear_velocity[0]
+        """
+        local forward velocity
+        """
+        return self.local_velocity[0]
 
     @property
     def side_velocity(self) -> float:
-        return self.robot_id.root_linear_velocity[2]
+        """
+        local side_velocity
+        """
+        return self.local_velocity[2]
     
     @property
     def position(self) -> np.ndarray:
+        """
+        translation in global frame
+        """
         return self.robot_id.transformation.translation
+    
+    @property
+    def local_velocity(self):
+        """
+        return's local velocity and corrects for initial rotation of aliengo
+        [forward, right, up]
+        """
+        local_vel = self.robot_id.transformation.inverted().transform_vector(self.velocity)
+        return np.array([local_vel[0], local_vel[2], -local_vel[1]])
     
     def joint_torques(self) -> np.ndarray:
         # print("OG TORQUE: ", self.robot_id.joint_forces)
         # print("IN HEREEEEE")
         phys_ts = self._sim.get_physics_time_step()
-        print(type(phys_ts))
-        print("PHYSICS TS: ", phys_ts)
+        # print(type(phys_ts))
+        # print("PHYSICS TS: ", phys_ts)
         py_torques = self.robot_id.get_joint_motor_torques(phys_ts)
+        # print("py_torques: ", py_torques)
         torques = np.array(py_torques, dtype=np.float32)
         off_indices = (np.array([0, 4, 8, 12]), )
         assert((torques[off_indices] == 0).all())
@@ -114,30 +145,39 @@ class AlienGo:
             pos: the new position to set to
         """
         return JointMotorSettings(
+
+            # pos,  # position_target
+            # 0.6,  # position_gain
+            # 0.0,  # velocity_target
+            # 1.5,  # velocity_gain
+            # 1.0,  # max_impulse
+
             pos,  # position_target
-            0.6,  # position_gain
+            0.03,  # position_gain
             0.0,  # velocity_target
-            1.5,  # velocity_gain
+            1.8,  # velocity_gain
             1.0,  # max_impulse
         )
 
-    def set_pose_jms(self, pose):
+    def set_pose_jms(self, pose, kinematic_snap=True):
         f""" Sets a robot's pose and changes the jms to that pose (rests at given position)
         """
         # Snap joints kinematically
-        self.robot_id.joint_positions = pose
+        if kinematic_snap:
+            self.robot_id.joint_positions = pose
 
         # Make motor controllers maintain this position
         for idx, p in enumerate(pose):
             self.robot_id.update_joint_motor(idx, self._new_jms(p))
 
     def prone(self):
+        # self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
         self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
     
     def stand(self):
-        self.set_pose_jms(np.array([0, 0.432, -0.77] * 4))
+        self.set_pose_jms(self.standing_pos)
 
-    def reset(self):
+    def reset(self, yaw=0):
         f"""
             Reset's all the robots movemement, moves it back to center of platform, 
         """
@@ -149,7 +189,9 @@ class AlienGo:
         # Roll robot 90 deg
         base_transform = mn.Matrix4.rotation(
             mn.Rad(np.deg2rad(-90)), mn.Vector3(1.0, 0.0, 0.0)
-        )
+        ) @ mn.Matrix4.rotation(
+            mn.Rad(np.deg2rad(yaw)), mn.Vector3(0.0, 0.0, 1.0)
+        ) 
 
         # Position above center of platform
         base_transform.translation = (

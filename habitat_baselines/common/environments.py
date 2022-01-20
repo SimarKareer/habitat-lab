@@ -38,19 +38,16 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         self.rewards = self.task_config.TASK.REWARD
         self.time_step = self._sim.get_physics_time_step()
 
-        print("HEREEEE")
+        print("time step: ", self.time_step)
 
     def _task_reset(self):
         self.robot.reset()
         self.robot.stand()
 
     def _get_success(self):
-        return (
-            (self.robot.robot_id.root_linear_velocity - self.target_velocity)
-            < 0.1
-        ).all()
+        return abs(self.robot.forward_velocity - self.target_velocity[0]) < 0.1
         # self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
-    
+
     def image_text(self, img):
         vxr = self.named_rewards["forward_velocity_reward"][0]
         vyr = self.named_rewards["side_velocity_reward"][0]
@@ -86,7 +83,7 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
             (255, 255, 255, 255),  # font color
             3,  # font stroke
         )
-        
+
         wx, wy, wz = self.robot.robot_id.root_angular_velocity
         img = cv2.putText(
             img,  # numpy array on which text is written
@@ -115,7 +112,8 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
 
         reward_terms["forward_velocity_reward"] = np.array(
             [
-                -self.rewards.a2 * np.abs(
+                -self.rewards.a2
+                * np.abs(
                     self.robot.forward_velocity - self.target_forward_velocity
                 )
             ]
@@ -126,7 +124,6 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         reward_terms["angular_velocity_reward"] = np.array(
             [-self.robot.robot_id.root_angular_velocity[1] ** 2]
         )
-
 
         # r, p, y = np.abs(self.robot.get_rpy())
         # reward_terms["balance_reward"] = np.array(
@@ -152,13 +149,17 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         # print("TORQUE: ", self.robot.joint_torques)
         # print("VEL: ", self.robot.joint_velocities)
 
-        reward_terms["energy_reward"] = np.array([
-            -self.robot.joint_torques().dot(self.robot.joint_velocities)
-        ])
+        reward_terms["energy_reward"] = np.array(
+            [
+                -np.abs(
+                    self.robot.joint_torques().dot(self.robot.joint_velocities)
+                )
+            ]
+        )
 
-        reward_terms["alive_reward"] = np.array([
-            self.rewards.alive
-        ])
+        reward_terms["alive_reward"] = np.array(
+            [self.rewards.alive * self.target_forward_velocity]
+        )
         self.named_rewards = reward_terms
 
         # Log accumulated reward info
@@ -171,13 +172,19 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         )
 
         return reward_terms
-    
+
+    def should_end(self):
+        roll, pitch = self.robot.get_rp()
+        # print("Terminated Episode: ", self.robot.height, roll, pitch)
+        return False
+        # return self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2 # REMEMBER: uncomment
+
     def add_force(self, fx, fy, fz, link=0):
         self.robot.robot_id.add_link_force(link, mn.Vector3(fx, fy, fz))
+
     # def force_adjustment(self, kp, kd):
     #     forward_force = kp * (self.target_forward_velocity - self.robot.forward_velocity) #TODO add derivative term as well
     #     self.robot.robot_id.add_link_force(0, mn.Vector3(forward_force, 0, 0))
-        
     #     side_force = kp * (-self.robot.position[2]) + kd * (-self.robot.side_velocity)
     #     self.robot.robot_id.add_link_force(0, mn.Vector3(0, 0, side_force))
 
@@ -198,6 +205,12 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
     def _baseline_policy(self):
         f""" Task Specific policy which produces actions that should maximize reward for debug purposes 
         """
+        print(
+            "Target: ",
+            self.target_joint_positions,
+            "Current: ",
+            self.robot.joint_positions,
+        )
         deltas = []
         for i, j in zip(
             self.robot.joint_positions, self.target_joint_positions
@@ -216,6 +229,31 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
     def _get_success(self):
         return abs(self.robot.height - self.goal_height) < 0.05
 
+    def image_text(self, img):
+        imitation = self.named_rewards["imitation_reward"].sum()
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"imitation: {imitation:.3f}",  # text
+            (20, 90),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+
+        energy = self.named_rewards["energy_reward"][0]
+        img = cv2.putText(
+            img,  # numpy array on which text is written
+            f"energy reward: {energy:.1f}",  # text
+            (20, 130),  # position at which writing has to start
+            cv2.FONT_HERSHEY_SIMPLEX,  # font family
+            0.75,  # font size
+            (255, 255, 255, 255),  # font color
+            3,  # font stroke
+        )
+
+        return img
+
     def _get_reward_terms(self, observations) -> np.array:
         reward_terms = OrderedDict()
 
@@ -226,6 +264,15 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
             ** 2
             / self.num_joints
         )
+
+        reward_terms["energy_reward"] = np.array(
+            [
+                -np.abs(
+                    self.robot.joint_torques().dot(self.robot.joint_velocities)
+                )
+            ]
+        )
+        self.named_rewards = reward_terms
 
         # Log accumulated reward info
         for k, v in reward_terms.items():

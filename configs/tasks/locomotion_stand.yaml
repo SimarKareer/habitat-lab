@@ -8,13 +8,13 @@ SIMULATOR:
   SETTLE_TIME: 20
 DEBUG:
   FIXED_BASE: False
-  VIDEO_FREQ: 1000 # None if you don't want any videos
   BASELINE_POLICY: False
 
 TASK:
   ACTION:
     NUM_JOINTS: 12
-    MAX_DEGREE_DELTA: 5 # in degrees
+    MAX_DEGREE_DELTA: 10 # in degrees
+    TYPE: relative
   START:
     CALF: -2.5
     THIGH: 1.3

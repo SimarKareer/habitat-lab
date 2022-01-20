@@ -31,11 +31,12 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.max_rad_delta = np.deg2rad(
             self.task_config.TASK.ACTION.MAX_DEGREE_DELTA
         )
+
         self.action_space = ActionSpace(
             {
                 "joint_deltas": spaces.Box(
-                    low=-self.max_rad_delta,
-                    high=self.max_rad_delta,
+                    low=-1,
+                    high=1,
                     shape=(self.num_joints,),
                     dtype=np.float32,
                 )
@@ -115,18 +116,37 @@ class LocomotionRLEnv(habitat.RLEnv):
     
     def image_text(self, img):
         return img
+    
+    def should_end(self):
+        return False
 
-    def step(self, action, action_args, *args, **kwargs):
+    def step(self, action, action_args, step_render=False, *args, **kwargs):
         """Updates robot with given actions and calls physics sim step"""
         deltas = action_args["joint_deltas"]
 
-        # Clip actions and scale
-        deltas = np.clip(deltas, -1.0, 1.0) * self.max_rad_delta
+
+        # print("BASELINE POLICY?: ", self.task_config.DEBUG.BASELINE_POLICY)
         if self.task_config.DEBUG.BASELINE_POLICY:
             deltas = self._baseline_policy()
-
-        # Update current state
-        self.robot.add_jms_pos(deltas)
+            self.robot.add_jms_pos(deltas)
+            print("using baseline policy")
+        else:
+            # print("deltas: ", deltas)
+            # Update current state
+            if self.task_config.TASK.ACTION.TYPE == "relative":
+                #rm jitters
+                for i, d in enumerate(deltas):
+                    if abs(d) <= 0.1:
+                        deltas[i] = 0
+                # Clip actions and scale
+                deltas = np.clip(deltas, -1.0, 1.0) * self.max_rad_delta
+                
+                self.robot.add_jms_pos(deltas)
+            elif self.task_config.TASK.ACTION.TYPE == "absolute":
+                deltas = deltas * self.robot.joint_limits_energy + self.robot.standing_pos
+                # print("setting: ", deltas)
+                self.robot.set_pose_jms(deltas, kinematic_snap=False)
+        
         self._sim.step_physics(1.0 / self.sim_hz)
 
         # Return observations (error for each knob)
@@ -144,8 +164,8 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         # Check termination conditions
         self.num_steps += 1
-        done = self.num_steps == self._max_episode_steps
-        if done and self.render:
+        done = self.num_steps == self._max_episode_steps or self.should_end()
+        if (done and self.render) or step_render: #self.render needs to be on, but because of this self.should_end is causing it to be done every step
             vut.make_video(
                 self.viz_buffer,
                 "rgba_camera",
@@ -241,12 +261,12 @@ class LocomotionRLEnv(habitat.RLEnv):
             cube_handle
         )
         cube_template_cpy.scale = np.array([5.0, 0.2, 5.0])
-        cube_template_cpy.friction_coefficient = 0.3
+        cube_template_cpy.friction_coefficient = 0.5
         obj_template_mgr.register_template(cube_template_cpy)
         rigid_obj_mgr = sim.get_rigid_object_manager()
         ground_plane = rigid_obj_mgr.add_object_by_template_handle(cube_handle)
         ground_plane.translation = [0.0, -0.2, 0.0]
-        ground_plane.motion_type = habitat_sim.physics.MotionType.STATIC
+        ground_plane.motion_type = habitat_sim.physics.MotionType.KINEMATIC
 
         return sim
 

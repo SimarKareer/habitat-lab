@@ -176,8 +176,8 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
     def should_end(self):
         roll, pitch = self.robot.get_rp()
         # print("Terminated Episode: ", self.robot.height, roll, pitch)
-        return False
-        # return self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2 # REMEMBER: uncomment
+        # return False
+        return self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2 # REMEMBER: uncomment
 
     def add_force(self, fx, fy, fz, link=0):
         self.robot.robot_id.add_link_force(link, mn.Vector3(fx, fy, fz))

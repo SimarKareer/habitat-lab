@@ -6,6 +6,7 @@ from habitat_sim.physics import JointMotorSettings
 
 from habitat.utils.geometry_utils import wrap_heading
 
+
 class AlienGo:
     def __init__(self, robot_id, sim, fixed_base, task_config):
         self.robot_id = robot_id
@@ -38,7 +39,6 @@ class AlienGo:
         self.joint_limits_energy = np.array([0.15, 0.4, 0.4] * 4)
         # self.joint_limits_upper_energy = np.array([0.15, 0.4, 0.4] * 4)
 
-
     @property
     def height(self):
         # Translation is [y, z, x]
@@ -51,7 +51,7 @@ class AlienGo:
     @property
     def joint_positions(self) -> np.ndarray:
         return np.array(self.robot_id.joint_positions, dtype=np.float32)
-    
+
     @property
     def velocity(self) -> mn.Vector3:
         """
@@ -72,23 +72,25 @@ class AlienGo:
         local side_velocity
         """
         return self.local_velocity[2]
-    
+
     @property
     def position(self) -> np.ndarray:
         """
         translation in global frame
         """
         return self.robot_id.transformation.translation
-    
+
     @property
     def local_velocity(self):
         """
         return's local velocity and corrects for initial rotation of aliengo
         [forward, right, up]
         """
-        local_vel = self.robot_id.transformation.inverted().transform_vector(self.velocity)
+        local_vel = self.robot_id.transformation.inverted().transform_vector(
+            self.velocity
+        )
         return np.array([local_vel[0], local_vel[2], -local_vel[1]])
-    
+
     def joint_torques(self) -> np.ndarray:
         # print("OG TORQUE: ", self.robot_id.joint_forces)
         # print("IN HEREEEEE")
@@ -98,9 +100,9 @@ class AlienGo:
         py_torques = self.robot_id.get_joint_motor_torques(phys_ts)
         # print("py_torques: ", py_torques)
         torques = np.array(py_torques, dtype=np.float32)
-        off_indices = (np.array([0, 4, 8, 12]), )
-        assert((torques[off_indices] == 0).all())
-        on_indices = (np.array([1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]), )
+        off_indices = (np.array([0, 4, 8, 12]),)
+        assert (torques[off_indices] == 0).all()
+        on_indices = (np.array([1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]),)
         torques = torques[on_indices]
         return torques[:12]
 
@@ -145,13 +147,11 @@ class AlienGo:
             pos: the new position to set to
         """
         return JointMotorSettings(
-
             # pos,  # position_target
             # 0.6,  # position_gain
             # 0.0,  # velocity_target
             # 1.5,  # velocity_gain
             # 1.0,  # max_impulse
-
             pos,  # position_target
             0.03,  # position_gain
             0.0,  # velocity_target
@@ -173,7 +173,7 @@ class AlienGo:
     def prone(self):
         # self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
         self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
-    
+
     def stand(self):
         self.set_pose_jms(self.standing_pos)
 
@@ -191,7 +191,7 @@ class AlienGo:
             mn.Rad(np.deg2rad(-90)), mn.Vector3(1.0, 0.0, 0.0)
         ) @ mn.Matrix4.rotation(
             mn.Rad(np.deg2rad(yaw)), mn.Vector3(0.0, 0.0, 1.0)
-        ) 
+        )
 
         # Position above center of platform
         base_transform.translation = (
@@ -254,7 +254,7 @@ class AlienGo:
         roll, pitch, yaw = self._euler_from_quaternion(x, y, z, w)
         rpy = wrap_heading(np.array([roll, pitch, yaw]))
         return rpy
-    
+
     def get_rp(self):
         return self.get_rpy()[:2]
 

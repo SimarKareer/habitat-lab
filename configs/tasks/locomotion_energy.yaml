@@ -1,5 +1,5 @@
 ENVIRONMENT:
-  MAX_EPISODE_STEPS: 500
+  MAX_EPISODE_STEPS: 1000
   SUCCESS_THRESH: 5
 SIMULATOR:
   ROBOT_URDF: /nethome/skareer6/flash/Projects/VisualLocomotion/habitat-lab/data/URDF_demo_assets/aliengo/urdf/aliengo.urdf

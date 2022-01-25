@@ -223,7 +223,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         # place our agent in the scene
         agent_state = habitat_sim.AgentState()
         agent_state.position = [-1.1, 0.5, 1.1]
-        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-40), 0.0)
+        agent_state.rotation *= qt.from_euler_angles(0.0, np.deg2rad(-50), 0.0)
         agent = self._sim.initialize_agent(0, agent_state)
 
         return agent.scene_node.transformation_matrix()
@@ -262,7 +262,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         cube_template_cpy = obj_template_mgr.get_template_by_handle(
             cube_handle
         )
-        cube_template_cpy.scale = np.array([5.0, 0.2, 5.0])
+        cube_template_cpy.scale = np.array([10.0, 0.2, 10.0])
         cube_template_cpy.friction_coefficient = 0.5
         obj_template_mgr.register_template(cube_template_cpy)
         rigid_obj_mgr = sim.get_rigid_object_manager()

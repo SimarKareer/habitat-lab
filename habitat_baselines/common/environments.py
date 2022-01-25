@@ -49,62 +49,29 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         # self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
 
     def image_text(self, img):
+        lines = []
+
         vxr = self.named_rewards["forward_velocity_reward"][0]
         vyr = self.named_rewards["side_velocity_reward"][0]
-        img = cv2.putText(
-            img,  # numpy array on which text is written
-            f"vx reward: {vxr:.3f} vy reward: {vyr:.3f}",  # text
-            (20, 90),  # position at which writing has to start
-            cv2.FONT_HERSHEY_SIMPLEX,  # font family
-            0.75,  # font size
-            (255, 255, 255, 255),  # font color
-            3,  # font stroke
-        )
+        lines.append(f"vx reward: {vxr:.3f} vy reward: {vyr:.3f}")
 
         vx = self.robot.forward_velocity
         vy = self.robot.side_velocity
-        img = cv2.putText(
-            img,  # numpy array on which text is written
-            f"vx: {vx:.3f} vy: {vy:.3f}",  # text
-            (20, 130),  # position at which writing has to start
-            cv2.FONT_HERSHEY_SIMPLEX,  # font family
-            0.75,  # font size
-            (255, 255, 255, 255),  # font color
-            3,  # font stroke
-        )
+        lines.append(f"vx: {vx:.3f} vy: {vy:.3f}")
 
         angr = self.named_rewards["angular_velocity_reward"][0]
-        img = cv2.putText(
-            img,  # numpy array on which text is written
-            f"angular vel reward: {angr:.3f}",  # text
-            (20, 170),  # position at which writing has to start
-            cv2.FONT_HERSHEY_SIMPLEX,  # font family
-            0.75,  # font size
-            (255, 255, 255, 255),  # font color
-            3,  # font stroke
-        )
+        lines.append(f"angular vel reward: {angr:.3f}")
 
         wx, wy, wz = self.robot.robot_id.root_angular_velocity
-        img = cv2.putText(
-            img,  # numpy array on which text is written
-            f"angular vel: {wx:.1f}, {wy:.1f}, {wz:.1f}",  # text
-            (20, 210),  # position at which writing has to start
-            cv2.FONT_HERSHEY_SIMPLEX,  # font family
-            0.75,  # font size
-            (255, 255, 255, 255),  # font color
-            3,  # font stroke
-        )
-        energy = self.named_rewards["energy_reward"][0]
-        img = cv2.putText(
-            img,  # numpy array on which text is written
-            f"energy reward: {energy:.1f}",  # text
-            (20, 250),  # position at which writing has to start
-            cv2.FONT_HERSHEY_SIMPLEX,  # font family
-            0.75,  # font size
-            (255, 255, 255, 255),  # font color
-            3,  # font stroke
-        )
+        lines.append(f"angular vel: {wx:.1f}, {wy:.1f}, {wz:.1f}")
 
+        energy = self.named_rewards["energy_reward"][0]
+        lines.append(f"energy reward: {energy:.1f}")
+
+        height = self.robot.height
+        lines.append(f"Robot Height: {height:.2f}")
+
+        img = vut.append_text_to_image(img, lines)
         return img
 
     def _get_reward_terms(self, observations) -> np.array:
@@ -177,7 +144,9 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         roll, pitch = self.robot.get_rp()
         # print("Terminated Episode: ", self.robot.height, roll, pitch)
         # return False
-        return self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2 # REMEMBER: uncomment
+        return (
+            self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2
+        )  # REMEMBER: uncomment
 
     def add_force(self, fx, fy, fz, link=0):
         self.robot.robot_id.add_link_force(link, mn.Vector3(fx, fy, fz))

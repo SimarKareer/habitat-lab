@@ -84,13 +84,7 @@ class AlienGo:
     @property
     def joint_torques(self) -> np.ndarray:
         phys_ts = self._sim.get_physics_time_step()
-        py_torques = self.robot_id.get_joint_motor_torques(phys_ts)
-        return np.zeros(12, dtype=np.float32)
-        torques = np.array(py_torques, dtype=np.float32)
-        off_indices = np.array([0, 4, 8, 12])
-        assert (torques[off_indices] == 0).all()
-        on_indices = np.array([i for i in range(16) if i not in off_indices])
-        torques = torques[on_indices]
+        torques = self.robot_id.get_joint_motor_torques(phys_ts)
         return torques
 
     def set_joint_positions(self, pose):

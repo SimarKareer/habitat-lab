@@ -291,3 +291,35 @@ def append_text_to_image(image: np.ndarray, text: str):
     text_image = blank_image[0 : y + 10, 0:w]
     final = np.concatenate((image, text_image), axis=0)
     return final
+
+
+def overlay_text_to_image(image, lines):
+    """
+    Parameters:
+        image: (np.array): The frame to add the text to.
+        lines (list):
+    Returns:
+        image: (np.array): The modified image with the text appended.
+    """
+    font_size = 0.5
+    font_thickness = 1
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    y = 0
+    image_copy = image.copy()
+    for line in lines:
+        textsize = cv2.getTextSize(line, font, font_size, font_thickness)[0]
+        y += textsize[1] + 10
+        x = 10
+        for font_thickness, color in [(4, (0, 0, 0)), (1, (255, 255, 255))]:
+            cv2.putText(
+                image_copy,
+                line,
+                (x, y),
+                font,
+                font_size,
+                color,
+                font_thickness,
+                lineType=cv2.LINE_AA,
+            )
+    return image_copy

@@ -1,10 +1,10 @@
 import math
+
 import magnum as mn
 import numpy as np
-from habitat_sim.physics import JointMotorSettings
-
 
 from habitat.utils.geometry_utils import wrap_heading
+from habitat_sim.physics import JointMotorSettings
 
 
 class AlienGo:
@@ -37,7 +37,6 @@ class AlienGo:
 
         self.standing_pos = np.array([0, 0.432, -0.77] * 4)
         self.joint_limits_energy = np.array([0.15, 0.4, 0.4] * 4)
-        # self.joint_limits_upper_energy = np.array([0.15, 0.4, 0.4] * 4)
 
     @property
     def height(self):
@@ -54,36 +53,12 @@ class AlienGo:
 
     @property
     def velocity(self) -> mn.Vector3:
-        """
-        velocity in global frame
-        """
+        """velocity in global frame"""
         return self.robot_id.root_linear_velocity
 
     @property
-    def forward_velocity(self) -> float:
-        """
-        local forward velocity
-        """
-        return self.local_velocity[0]
-
-    @property
-    def side_velocity(self) -> float:
-        """
-        local side_velocity
-        """
-        return self.local_velocity[2]
-
-    @property
-    def position(self) -> np.ndarray:
-        """
-        translation in global frame
-        """
-        return self.robot_id.transformation.translation
-
-    @property
     def local_velocity(self):
-        """
-        return's local velocity and corrects for initial rotation of aliengo
+        """returns local velocity and corrects for initial rotation of aliengo
         [forward, right, up]
         """
         local_vel = self.robot_id.transformation.inverted().transform_vector(
@@ -91,20 +66,32 @@ class AlienGo:
         )
         return np.array([local_vel[0], local_vel[2], -local_vel[1]])
 
+    @property
+    def forward_velocity(self) -> float:
+        """local forward velocity"""
+        return self.local_velocity[0]
+
+    @property
+    def side_velocity(self) -> float:
+        """local side_velocity"""
+        return self.local_velocity[2]
+
+    @property
+    def position(self) -> np.ndarray:
+        """translation in global frame"""
+        return self.robot_id.transformation.translation
+
+    @property
     def joint_torques(self) -> np.ndarray:
-        # print("OG TORQUE: ", self.robot_id.joint_forces)
-        # print("IN HEREEEEE")
         phys_ts = self._sim.get_physics_time_step()
-        # print(type(phys_ts))
-        # print("PHYSICS TS: ", phys_ts)
         py_torques = self.robot_id.get_joint_motor_torques(phys_ts)
-        # print("py_torques: ", py_torques)
+        return np.zeros(12, dtype=np.float32)
         torques = np.array(py_torques, dtype=np.float32)
-        off_indices = (np.array([0, 4, 8, 12]),)
+        off_indices = np.array([0, 4, 8, 12])
         assert (torques[off_indices] == 0).all()
-        on_indices = (np.array([1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]),)
+        on_indices = np.array([i for i in range(16) if i not in off_indices])
         torques = torques[on_indices]
-        return torques[:12]
+        return torques
 
     def set_joint_positions(self, pose):
         """This is kinematic! Not dynamic."""
@@ -119,18 +106,13 @@ class AlienGo:
         for c in contacts:
             for link in [c.link_id_a, c.link_id_b]:
                 contacting_feet.add(self.robot_id.get_link_name(link))
-        return np.array(
-            [
-                1 if foot in contacting_feet else 0
-                for foot in ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
-            ]
-        )
+        feet = ["FL_foot", "FR_foot", "RL_foot", "RR_foot"]
+        return np.array([1 if foot in contacting_feet else 0 for foot in feet])
 
     def _jms_copy(self, jms):
         """Returns a deep copy of a jms
 
-        Args:
-            jms: the jms to copy
+        :param jms: the jms to copy
         """
         return JointMotorSettings(
             jms.position_target,
@@ -143,15 +125,9 @@ class AlienGo:
     def _new_jms(self, pos):
         """Returns a new jms with default settings at a given position
 
-        Args:
-            pos: the new position to set to
+        :param pos: the new position to set to
         """
         return JointMotorSettings(
-            # pos,  # position_target
-            # 0.6,  # position_gain
-            # 0.0,  # velocity_target
-            # 1.5,  # velocity_gain
-            # 1.0,  # max_impulse
             pos,  # position_target
             0.03,  # position_gain
             0.0,  # velocity_target
@@ -160,7 +136,8 @@ class AlienGo:
         )
 
     def set_pose_jms(self, pose, kinematic_snap=True):
-        f""" Sets a robot's pose and changes the jms to that pose (rests at given position)
+        """Sets a robot's pose and changes the jms to that pose (rests at
+        given position)
         """
         # Snap joints kinematically
         if kinematic_snap:
@@ -171,16 +148,13 @@ class AlienGo:
             self.robot_id.update_joint_motor(idx, self._new_jms(p))
 
     def prone(self):
-        # self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
         self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
 
     def stand(self):
         self.set_pose_jms(self.standing_pos)
 
     def reset(self, yaw=0):
-        f"""
-            Reset's all the robots movemement, moves it back to center of platform, 
-        """
+        """Resets robot's movement, moves it back to center of platform"""
         # Zero out the link and root velocities
         self.robot_id.clear_joint_states()
         self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
@@ -201,31 +175,21 @@ class AlienGo:
         )
         self.robot_id.transformation = base_transform
 
-        # Reset all jms
-        # base_jms = self._new_jms(0)
-        # for i in range(12):
-        #     self.robot_id.update_joint_motor(i, base_jms)
-
-        # self._set_joint_type_pos("thigh", self.task_config.TASK.START.THIGH)
-        # self._set_joint_type_pos("calf", self.task_config.TASK.START.CALF)
-
     def _set_joint_type_pos(self, joint_type, joint_pos):
         """Sets all joints of a given type to a given position
 
-        Args:
-            joint_type: type of joint ie hip, thigh or calf
-            joint_pos: position to set these joints to
+        :param joint_type: type of joint ie hip, thigh or calf
+        :param joint_pos: position to set these joints to
         """
         for idx, joint_name in enumerate(self.jmsIdxToJoint):
             if joint_type in joint_name:
                 self.robot_id.update_joint_motor(idx, self._new_jms(joint_pos))
 
     def add_jms_pos(self, joint_pos):
-        """
-        Updates existing joint positions by adding each position in array of
+        """Updates existing joint positions by adding each position in array of
         joint_positions
-        Args
-            joint_pos: array of delta joint positions
+
+        :param joint_pos: array of delta joint positions
         """
         for i, new_pos in enumerate(joint_pos):
             jms = self._jms_copy(self.robot_id.get_joint_motor_settings(i))
@@ -239,8 +203,7 @@ class AlienGo:
     def get_rpy(self):
         """Given a numpy quaternion we'll return the roll pitch yaw
 
-        Returns:
-            rpy: tuple of roll, pitch yaw
+        :return: rpy: tuple of roll, pitch yaw
         """
         quat = self.robot_id.rotation.normalized()
         undo_rot = mn.Quaternion(
@@ -259,23 +222,22 @@ class AlienGo:
         return self.get_rpy()[:2]
 
     def _euler_from_quaternion(self, x, y, z, w):
-        """
-        Convert a quaternion into euler angles (roll, yaw, pitch)
+        """Convert a quaternion into euler angles (roll, yaw, pitch)
         roll is rotation around x in radians (counterclockwise)
         pitch is rotation around y in radians (counterclockwise)
         yaw is rotation around z in radians (counterclockwise)
         """
-        t0 = +2.0 * (w * x + y * z)
-        t1 = +1.0 - 2.0 * (x * x + y * y)
+        t0 = 2.0 * (w * x + y * z)
+        t1 = 1.0 - 2.0 * (x * x + y * y)
         roll_x = math.atan2(t0, t1)
 
-        t2 = +2.0 * (w * y - z * x)
-        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = 2.0 * (w * y - z * x)
+        t2 = 1.0 if t2 > 1.0 else t2
         t2 = -1.0 if t2 < -1.0 else t2
         pitch_y = math.asin(t2)
 
-        t3 = +2.0 * (w * z + x * y)
-        t4 = +1.0 - 2.0 * (y * y + z * z)
+        t3 = 2.0 * (w * z + x * y)
+        t4 = 1.0 - 2.0 * (y * y + z * z)
         yaw_z = math.atan2(t3, t4)
 
         return roll_x, -yaw_z, pitch_y  # in radians

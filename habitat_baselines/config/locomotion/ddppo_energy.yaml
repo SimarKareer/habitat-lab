@@ -1,13 +1,12 @@
 VERBOSE: False
-# BASE_TASK_CONFIG_PATH: "/private/home/naokiyokoyama/loco/habitat-lab/configs/tasks/locomotion_stand.yaml"
-BASE_TASK_CONFIG_PATH: /nethome/skareer6/flash/Projects/VisualLocomotion/habitat-lab/configs/tasks/locomotion_energy.yaml
+BASE_TASK_CONFIG_PATH: configs/tasks/locomotion_energy.yaml
 TRAINER_NAME: "ddppo"
 ENV_NAME: "LocomotionRLEnvEnergy"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0
 VIDEO_OPTION: []
 TENSORBOARD_DIR: "tb"
-VIDEO_DIR: "/nethome/skareer6/flash/Projects/VisualLocomotion/AliengoGym/basic_vids"
+VIDEO_DIR: "data/videos"
 TEST_EPISODE_COUNT: -1
 EVAL_CKPT_PATH_DIR: "data/new_checkpoints"
 NUM_ENVIRONMENTS: 4

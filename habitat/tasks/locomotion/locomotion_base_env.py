@@ -1,22 +1,16 @@
-from typing import Optional, Type
-from habitat.sims.habitat_simulator.habitat_simulator import HabitatSim
-import habitat_sim.utils.viz_utils as vut
-import numpy as np
-import os
-
-import habitat
-import habitat_sim
-from habitat import Config, Dataset
-from habitat.core.spaces import ActionSpace
+from collections import defaultdict
 from gym import spaces
+import habitat
+from habitat import Config
+from habitat.core.spaces import ActionSpace
+from habitat.tasks.locomotion.aliengo import AlienGo
+import habitat_sim
+import habitat_sim.utils.viz_utils as vut
 from habitat_baselines.common.baseline_registry import baseline_registry
-import habitat_baselines.common.knobs_environment
+import os
+import numpy as np
 import quaternion as qt
 import torch
-import cv2
-from collections import defaultdict, OrderedDict
-from habitat.tasks.locomotion.aliengo import AlienGo
-from habitat.utils.geometry_utils import wrap_heading
 
 
 @baseline_registry.register_env(name="LocomotionRLEnv")
@@ -121,16 +115,14 @@ class LocomotionRLEnv(habitat.RLEnv):
         """Updates robot with given actions and calls physics sim step"""
         deltas = action_args["joint_deltas"]
 
-        # print("BASELINE POLICY?: ", self.task_config.DEBUG.BASELINE_POLICY)
         if self.task_config.DEBUG.BASELINE_POLICY:
             deltas = self._baseline_policy()
             self.robot.add_jms_pos(deltas)
             print("using baseline policy")
         else:
-            # print("deltas: ", deltas)
             # Update current state
             if self.task_config.TASK.ACTION.TYPE == "relative":
-                # rm jitters
+                # remove jitter
                 for i, d in enumerate(deltas):
                     if abs(d) <= 0.1:
                         deltas[i] = 0
@@ -157,7 +149,6 @@ class LocomotionRLEnv(habitat.RLEnv):
         # Text on Screen
         if self.render:
             self.viz_buffer.append(self._sim.get_sensor_observations())
-            # print(self.viz_buffer[-1])
             self.viz_buffer[-1]["rgba_camera"] = self.image_text(
                 self.viz_buffer[-1]["rgba_camera"]
             )
@@ -165,16 +156,16 @@ class LocomotionRLEnv(habitat.RLEnv):
         # Check termination conditions
         self.num_steps += 1
         done = self.num_steps == self._max_episode_steps or self.should_end()
-        if (
-            done and self.render
-        ) or step_render:  # self.render needs to be on, but because of this self.should_end is causing it to be done every step
+
+        # self.render needs to be on, but because of this self.should_end
+        # is causing it to be done every step
+        if done and self.render or step_render:
             vut.make_video(
                 self.viz_buffer,
                 "rgba_camera",
                 "color",
                 os.path.join(
-                    self.video_dir,
-                    "vid{rand}.mp4".format(rand=np.random.randint(0, 1e6)),
+                    self.video_dir, f"vid{np.random.randint(0, 1e6)}.mp4"
                 ),
                 open_vid=False,
                 fps=self.sim_hz,
@@ -188,7 +179,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         }
         info.update(self._get_extra_info())
 
-        # Add info about how much of each reward component has accumulated
+        # Add info about how much of each reward component has been accumulated
         info.update(self.accumulated_reward_info)
 
         return observations, reward, done, info

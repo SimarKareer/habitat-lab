@@ -8,11 +8,10 @@ from habitat_sim.physics import JointMotorSettings
 
 
 class AlienGo:
-    def __init__(self, robot_id, sim, fixed_base, task_config):
+    def __init__(self, robot_id, sim, fixed_base, robot_cfg):
         self.robot_id = robot_id
         self._sim = sim
         self.fixed_base = fixed_base
-        self.task_config = task_config
 
         self.jmsIdxToJoint = [
             "FL_hip",
@@ -30,13 +29,10 @@ class AlienGo:
         ]
 
         # joint position limits
-        self.joint_limits_lower = np.array(
-            [-0.1, -np.pi / 3, -5 / 6 * np.pi] * 4
-        )
-        self.joint_limits_upper = np.array([0.1, np.pi / 2.1, -np.pi / 4] * 4)
-
-        self.standing_pos = np.array([0, 0.432, -0.77] * 4)
-        self.joint_limits_energy = np.array([0.15, 0.4, 0.4] * 4)
+        self.standing_pose = np.array(robot_cfg.STANDING_POSE * 4)
+        self.joint_limits_stand = np.array(robot_cfg.JOINT_LIMITS_STAND * 4)
+        self.joint_limits_upper = np.array(robot_cfg.JOINT_LIMITS.UPPER * 4)
+        self.joint_limits_lower = np.array(robot_cfg.JOINT_LIMITS.LOWER * 4)
 
     @property
     def height(self):
@@ -84,7 +80,7 @@ class AlienGo:
     @property
     def joint_torques(self) -> np.ndarray:
         phys_ts = self._sim.get_physics_time_step()
-        torques = self.robot_id.get_joint_motor_torques(phys_ts)
+        torques = np.array(self.robot_id.get_joint_motor_torques(phys_ts))
         return torques
 
     def set_joint_positions(self, pose):
@@ -145,7 +141,7 @@ class AlienGo:
         self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
 
     def stand(self):
-        self.set_pose_jms(self.standing_pos)
+        self.set_pose_jms(self.standing_pose)
 
     def reset(self, yaw=0):
         """Resets robot's movement, moves it back to center of platform"""

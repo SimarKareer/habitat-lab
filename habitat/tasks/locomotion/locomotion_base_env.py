@@ -1,16 +1,23 @@
-from collections import defaultdict
-from gym import spaces
-import habitat
-from habitat import Config
-from habitat.core.spaces import ActionSpace
-from habitat.tasks.locomotion.aliengo import AlienGo
-import habitat_sim
-import habitat_sim.utils.viz_utils as vut
-from habitat_baselines.common.baseline_registry import baseline_registry
 import os
+from collections import defaultdict
+
 import numpy as np
 import quaternion as qt
 import torch
+from gym import spaces
+
+import habitat
+import habitat_sim
+import habitat_sim.utils.viz_utils as vut
+from habitat import Config
+from habitat.core.spaces import ActionSpace
+from habitat.tasks.locomotion.aliengo import AlienGo
+from habitat_baselines.common.baseline_registry import baseline_registry
+
+
+class ActionType:
+    RELATIVE = "relative"
+    ABSOLUTE = "absolute"
 
 
 @baseline_registry.register_env(name="LocomotionRLEnv")
@@ -29,7 +36,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.action_space = ActionSpace(
             {
                 "joint_deltas": spaces.Box(
-                    low=-1, high=1, shape=(self.num_joints,), dtype=np.float32,
+                    low=-1, high=1, shape=(self.num_joints,), dtype=np.float32
                 )
             }
         )
@@ -50,10 +57,10 @@ class LocomotionRLEnv(habitat.RLEnv):
                     dtype=np.float32,
                 ),
                 "euler_rot": spaces.Box(
-                    low=-np.pi, high=np.pi, shape=(2,), dtype=np.float32,
+                    low=-np.pi, high=np.pi, shape=(2,), dtype=np.float32
                 ),
                 "feet_contact": spaces.Box(
-                    low=0, high=1, shape=(4,), dtype=np.float32,
+                    low=0, high=1, shape=(4,), dtype=np.float32
                 ),
             }
         )
@@ -71,10 +78,10 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.fixed_base = self.task_config.DEBUG.FIXED_BASE
         ao_mgr = self._sim.get_articulated_object_manager()
         robot_id = ao_mgr.add_articulated_object_from_urdf(
-            self.sim_config.ROBOT_URDF, fixed_base=self.fixed_base
+            self.task_config.ROBOT.ROBOT_URDF, fixed_base=self.fixed_base
         )
         self.robot = AlienGo(
-            robot_id, self._sim, self.fixed_base, self.task_config
+            robot_id, self._sim, self.fixed_base, self.task_config.ROBOT
         )
 
         # Initialize attributes
@@ -92,6 +99,8 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.sim_hz = self.sim_config.SIM_HZ
         self.number_of_episodes = int(1e24)  # needed b/c habitat wants it
         self.accumulated_reward_info = defaultdict(float)
+        self.action_type = config.TASK_CONFIG.TASK.ACTION.TYPE
+        self.jitter_threshold = config.TASK_CONFIG.TASK.JITTER_THRESHOLD
 
     def reset(self):
         self._task_reset()
@@ -113,33 +122,35 @@ class LocomotionRLEnv(habitat.RLEnv):
 
     def step(self, action, action_args, step_render=False, *args, **kwargs):
         """Updates robot with given actions and calls physics sim step"""
-        deltas = action_args["joint_deltas"]
-
         if self.task_config.DEBUG.BASELINE_POLICY:
             deltas = self._baseline_policy()
             self.robot.add_jms_pos(deltas)
-            print("using baseline policy")
         else:
             # Update current state
-            if self.task_config.TASK.ACTION.TYPE == "relative":
-                # remove jitter
-                for i, d in enumerate(deltas):
-                    if abs(d) <= 0.1:
-                        deltas[i] = 0
-                # Clip actions and scale
-                deltas = np.clip(deltas, -1.0, 1.0) * self.max_rad_delta
+            if self.action_type == "relative":
+                action_scale = self.max_rad_delta
+                offset = self.robot.joint_positions
+            elif self.action_type == "absolute":
+                action_scale = self.robot.joint_limits_stand
+                offset = self.robot.standing_pose
+            else:
+                raise NotImplementedError(f"{self.action_type} unknown!")
+            deltas = action_args["joint_deltas"]
+            scaled_actions = np.clip(deltas, -1.0, 1.0) * action_scale
+            target_pose = scaled_actions + offset
 
-                self.robot.add_jms_pos(deltas)
-            elif self.task_config.TASK.ACTION.TYPE == "absolute":
-                deltas = (
-                    deltas * self.robot.joint_limits_energy
-                    + self.robot.standing_pos
-                )
-                self.robot.set_pose_jms(deltas, kinematic_snap=False)
+            # Remove jitter
+            jitter_inds = (
+                abs(target_pose - self.robot.joint_positions)
+                < self.jitter_threshold
+            )
+            target_pose[jitter_inds] = self.robot.joint_positions[jitter_inds]
+
+            self.robot.set_pose_jms(target_pose, kinematic_snap=False)
 
         self._sim.step_physics(1.0 / self.sim_hz)
 
-        # Return observations (error for each knob)
+        # Return observations
         observations = self._get_observations()
 
         # Get reward
@@ -185,8 +196,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         return observations, reward, done, info
 
     def _task_reset(self):
-        f""" Task specific robot position reset
-        """
+        f"""Task specific robot position reset"""
         raise NotImplementedError
 
     def _get_observations(self):
@@ -198,7 +208,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         }
 
     def _baseline_policy(self):
-        return np.zeros(self.num_joints)
+        raise NotImplementedError
 
     def _get_success(self):
         return False
@@ -232,9 +242,8 @@ class LocomotionRLEnv(habitat.RLEnv):
             rgb_camera = habitat_sim.CameraSensorSpec()
             rgb_camera.uuid = "rgba_camera"
             rgb_camera.sensor_type = habitat_sim.SensorType.COLOR
-
-            # Make camera res super low if we're not rendering
             rgb_camera.resolution = [540, 720]
+            # These are relative to the agent, not to global origin
             rgb_camera.position = [0.0, 0.0, 0.0]
             rgb_camera.orientation = [0.0, 0.0, 0.0]
 

@@ -1,10 +1,13 @@
 from collections import OrderedDict
-from habitat import Config
-from habitat.tasks.locomotion.locomotion_base_env import LocomotionRLEnv
-from habitat_baselines.common.baseline_registry import baseline_registry
-from habitat.utils.visualizations.utils import overlay_text_to_image
+
 import magnum as mn
 import numpy as np
+
+from habitat import Config
+from habitat.tasks.locomotion.locomotion_base_env import LocomotionRLEnv
+from habitat.utils.visualizations.utils import overlay_text_to_image
+from habitat_baselines.common.baseline_registry import baseline_registry
+
 
 @baseline_registry.register_env(name="LocomotionRLEnvEnergy")
 class LocomotionRLEnvEnergy(LocomotionRLEnv):
@@ -15,9 +18,7 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         )
         self.target_forward_velocity = self.task_config.TASK.TARGET_VELOCITY
         self.rewards_cfg = self.task_config.TASK.REWARD
-        self.time_step = self._sim.get_physics_time_step()
-
-        print("time step: ", self.time_step)
+        self.terminate_on_tilt = self.task_config.TASK.TERMINATE_ON_TILT
 
     def _task_reset(self):
         self.robot.reset()
@@ -76,6 +77,7 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         reward_terms["alive_reward"] = np.array(
             [self.rewards_cfg.alive * self.target_forward_velocity]
         )
+
         self.named_rewards = reward_terms
 
         # Log accumulated reward info
@@ -89,10 +91,10 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
         return reward_terms
 
     def should_end(self):
+        if not self.terminate_on_tilt:
+            return False
         roll, pitch = self.robot.get_rp()
-        return (
-            self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2
-        )
+        return self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2
 
     def add_force(self, fx, fy, fz, link=0):
         self.robot.robot_id.add_link_force(link, mn.Vector3(fx, fy, fz))

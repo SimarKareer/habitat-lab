@@ -12,8 +12,8 @@ EVAL_CKPT_PATH_DIR: "data/new_checkpoints"
 NUM_ENVIRONMENTS: 4
 SENSORS: ["DEPTH_SENSOR"]
 CHECKPOINT_FOLDER: "data/new_checkpoints"
-NUM_UPDATES: -1
-TOTAL_NUM_STEPS: 10000.0 #2.5e9
+NUM_UPDATES: 50000
+TOTAL_NUM_STEPS: -1.0
 LOG_INTERVAL: 10
 NUM_CHECKPOINTS: 100
 # Force PyTorch to be single threaded as
@@ -27,6 +27,9 @@ RL:
   POLICY:
     name: "LocomotionBaselinePolicy"
     action_distribution_type: "gaussian"
+    ACTION_DIST:
+      min_std: 0.2
+
   PPO:
     # ppo params
     loss_type: regular
@@ -36,12 +39,12 @@ RL:
     value_loss_coef: 0.5
     expressive_action_loss_coef: 1.0
     entropy_coef: 0.01
-    lr: 0.0001
-    eps: 1e-5
+    lr: 1e-8
+    eps: 1e-8
     max_grad_norm: 0.5
     num_steps: 1920
     use_gae: True
-    gamma: 0.99
+    gamma: 0.998
     tau: 0.95
     use_linear_clip_decay: False
     use_linear_lr_decay: False

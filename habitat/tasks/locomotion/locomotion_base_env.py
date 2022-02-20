@@ -105,7 +105,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self._task_reset()
 
         # Let robot settle on the ground
-        self._sim.step_physics(self.settle_time)
+        self.step_physics(self.settle_time)
 
         self.viz_buffer = []
         self.num_steps = 0
@@ -141,7 +141,7 @@ class LocomotionRLEnv(habitat.RLEnv):
 
             self.robot.set_pose_jms(target_pose, kinematic_snap=False)
 
-        self._sim.step_physics(1.0 / self.sim_hz)
+        self.step_physics(1.0 / self.sim_hz)
 
         # Return observations
         observations = self._get_observations()
@@ -269,6 +269,9 @@ class LocomotionRLEnv(habitat.RLEnv):
             "euler_rot": self.robot.get_rp(),
             "feet_contact": self.robot.get_feet_contacts(),
         }
+
+    def step_physics(self, seconds):
+        self._sim.step_physics(seconds)
 
     def image_text(self, img):
         return img

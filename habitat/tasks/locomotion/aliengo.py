@@ -7,6 +7,17 @@ from habitat.utils.geometry_utils import wrap_heading
 from habitat_sim.physics import JointMotorSettings
 
 
+def attribute_to_str(attr):
+    return attr.__repr__().split(" at ")[0].split(".")[-1]
+
+
+class VectorCachableProperty(property):
+    def __init__(self, attribute):
+        super().__init__(attribute)
+        # Use the name of the attribute as the cache key
+        self.cache_key = attribute_to_str(attribute)
+
+
 class AlienGo:
     def __init__(
         self,
@@ -42,25 +53,30 @@ class AlienGo:
         self.joint_limits_lower = np.array(robot_cfg.JOINT_LIMITS.LOWER * 4)
         self.reset_position = reset_position
 
-    @property
+    @VectorCachableProperty
     def height(self):
         # Translation is [y, z, x]
         return self.robot_id.rigid_state.translation[1]
 
-    @property
+    @VectorCachableProperty
     def joint_velocities(self) -> np.ndarray:
         return np.array(self.robot_id.joint_velocities, dtype=np.float32)
 
-    @property
+    @VectorCachableProperty
     def joint_positions(self) -> np.ndarray:
         return np.array(self.robot_id.joint_positions, dtype=np.float32)
 
-    @property
+    @VectorCachableProperty
+    def position(self) -> np.ndarray:
+        """translation in global frame"""
+        return self.robot_id.transformation.translation
+
+    @VectorCachableProperty
     def velocity(self) -> mn.Vector3:
         """velocity in global frame"""
         return self.robot_id.root_linear_velocity
 
-    @property
+    @VectorCachableProperty
     def local_velocity(self):
         """returns local velocity and corrects for initial rotation of aliengo
         [forward, right, up]
@@ -70,26 +86,42 @@ class AlienGo:
         )
         return np.array([local_vel[0], local_vel[2], -local_vel[1]])
 
-    @property
-    def forward_velocity(self) -> float:
-        """local forward velocity"""
-        return self.local_velocity[0]
-
-    @property
-    def side_velocity(self) -> float:
-        """local side_velocity"""
-        return self.local_velocity[2]
-
-    @property
-    def position(self) -> np.ndarray:
-        """translation in global frame"""
-        return self.robot_id.transformation.translation
-
-    @property
+    @VectorCachableProperty
     def joint_torques(self) -> np.ndarray:
         phys_ts = self._sim.get_physics_time_step()
         torques = np.array(self.robot_id.get_joint_motor_torques(phys_ts))
         return torques
+
+    @VectorCachableProperty
+    def forward_velocity(self) -> float:
+        """local forward velocity"""
+        return self.local_velocity[..., 0]
+
+    @VectorCachableProperty
+    def side_velocity(self) -> float:
+        """local side_velocity"""
+        return self.local_velocity[..., 2]
+
+    def get_rpy(self):
+        """Given a numpy quaternion we'll return the roll pitch yaw
+
+        :return: rpy: tuple of roll, pitch yaw
+        """
+        quat = self.robot_id.rotation.normalized()
+        undo_rot = mn.Quaternion(
+            ((np.sin(np.deg2rad(45)), 0.0, 0.0), np.cos(np.deg2rad(45)))
+        ).normalized()
+        quat = quat * undo_rot
+
+        x, y, z = quat.vector
+        w = quat.scalar
+
+        roll, pitch, yaw = self._euler_from_quaternion(x, y, z, w)
+        rpy = wrap_heading(np.array([roll, pitch, yaw]))
+        return rpy
+
+    def get_rp(self):
+        return self.get_rpy()[:2]
 
     def set_joint_positions(self, pose):
         """This is kinematic! Not dynamic."""
@@ -198,28 +230,8 @@ class AlienGo:
             )
             self.robot_id.update_joint_motor(i, jms)
 
-    def get_rpy(self):
-        """Given a numpy quaternion we'll return the roll pitch yaw
-
-        :return: rpy: tuple of roll, pitch yaw
-        """
-        quat = self.robot_id.rotation.normalized()
-        undo_rot = mn.Quaternion(
-            ((np.sin(np.deg2rad(45)), 0.0, 0.0), np.cos(np.deg2rad(45)))
-        ).normalized()
-        quat = quat * undo_rot
-
-        x, y, z = quat.vector
-        w = quat.scalar
-
-        roll, pitch, yaw = self._euler_from_quaternion(x, y, z, w)
-        rpy = wrap_heading(np.array([roll, pitch, yaw]))
-        return rpy
-
-    def get_rp(self):
-        return self.get_rpy()[:2]
-
-    def _euler_from_quaternion(self, x, y, z, w):
+    @staticmethod
+    def _euler_from_quaternion(x, y, z, w):
         """Convert a quaternion into euler angles (roll, yaw, pitch)
         roll is rotation around x in radians (counterclockwise)
         pitch is rotation around y in radians (counterclockwise)

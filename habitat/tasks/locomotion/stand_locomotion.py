@@ -1,10 +1,12 @@
 from collections import OrderedDict
+
 import cv2
+import numpy as np
+
 from habitat import Config
 from habitat.tasks.locomotion.locomotion_base_env import LocomotionRLEnv
 from habitat.utils.geometry_utils import wrap_heading
 from habitat_baselines.common.baseline_registry import baseline_registry
-import numpy as np
 
 
 @baseline_registry.register_env(name="LocomotionRLEnvStand")
@@ -12,7 +14,7 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
     def __init__(self, config: Config, render=False, *args, **kwargs):
         super().__init__(config, render=render, args=args, kwargs=kwargs)
         # The following represents a standing pose:
-        self.target_joint_positions = np.array([0, 0.8, -1.5] * 4)
+        self.target_joint_positions = self.robot.standing_pose
         self.use_exp_mse = self.config.RL.use_exp_mse
         self.goal_height = 0.486
 
@@ -21,7 +23,7 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
         self.robot.prone()
 
     def _baseline_policy(self):
-        f""" Task-specific policy which produces actions that should maximize
+        f"""Task-specific policy which produces actions that should maximize
         reward for debug purposes
         """
         print(

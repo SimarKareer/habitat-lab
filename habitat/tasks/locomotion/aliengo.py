@@ -8,7 +8,14 @@ from habitat_sim.physics import JointMotorSettings
 
 
 class AlienGo:
-    def __init__(self, robot_id, sim, fixed_base, robot_cfg):
+    def __init__(
+        self,
+        robot_id,
+        sim,
+        fixed_base,
+        robot_cfg,
+        reset_position=mn.Vector3(0.0, 0.5, 0.0),
+    ):
         self.robot_id = robot_id
         self._sim = sim
         self.fixed_base = fixed_base
@@ -33,6 +40,7 @@ class AlienGo:
         self.joint_limits_stand = np.array(robot_cfg.JOINT_LIMITS_STAND * 4)
         self.joint_limits_upper = np.array(robot_cfg.JOINT_LIMITS.UPPER * 4)
         self.joint_limits_lower = np.array(robot_cfg.JOINT_LIMITS.LOWER * 4)
+        self.reset_position = reset_position
 
     @property
     def height(self):
@@ -157,11 +165,11 @@ class AlienGo:
             mn.Rad(np.deg2rad(yaw)), mn.Vector3(0.0, 0.0, 1.0)
         )
 
-        # Position above center of platform
+        # Position above center of platform; slightly higher if fixed_base
         base_transform.translation = (
-            mn.Vector3(0.0, 0.8, 0.0)
+            self.reset_position + mn.Vector3(0.0, 0.3, 0.0)
             if self.fixed_base
-            else mn.Vector3(0.0, 0.5, 0.0)
+            else self.reset_position
         )
         self.robot_id.transformation = base_transform
 

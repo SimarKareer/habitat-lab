@@ -89,7 +89,7 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
         reward_terms["energy_reward"] = np.array(
             [
                 -np.abs(
-                    self.robot.joint_torques().dot(self.robot.joint_velocities)
+                    self.robot.joint_torques.dot(self.robot.joint_velocities)
                 )
             ]
         )

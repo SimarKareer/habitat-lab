@@ -114,12 +114,6 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return self._get_observations()
 
-    def image_text(self, img):
-        return img
-
-    def should_end(self):
-        return False
-
     def step(self, action, action_args, step_render=False, *args, **kwargs):
         """Updates robot with given actions and calls physics sim step"""
         if self.task_config.DEBUG.BASELINE_POLICY:
@@ -195,30 +189,6 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return observations, reward, done, info
 
-    def _task_reset(self):
-        f"""Task specific robot position reset"""
-        raise NotImplementedError
-
-    def _get_observations(self):
-        return {
-            "joint_pos": self.robot.joint_positions,
-            "joint_vel": self.robot.joint_velocities,
-            "euler_rot": self.robot.get_rp(),
-            "feet_contact": self.robot.get_feet_contacts(),
-        }
-
-    def _baseline_policy(self):
-        raise NotImplementedError
-
-    def _get_success(self):
-        return False
-
-    def _get_extra_info(self):
-        return {}
-
-    def _get_reward_terms(self, observations) -> np.array:
-        raise NotImplementedError
-
     def _place_agent(self):
         """Places our camera agent in a spot it can see the robot"""
         # place our agent in the scene
@@ -272,9 +242,39 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         return sim
 
-    def close(self):
-        pass
-
     def seed(self, seed):
         torch.manual_seed(seed)
         np.random.seed(seed)
+
+    def _get_observations(self):
+        return {
+            "joint_pos": self.robot.joint_positions,
+            "joint_vel": self.robot.joint_velocities,
+            "euler_rot": self.robot.get_rp(),
+            "feet_contact": self.robot.get_feet_contacts(),
+        }
+
+    def image_text(self, img):
+        return img
+
+    def should_end(self):
+        return False
+
+    def _task_reset(self):
+        f"""Task specific robot position reset"""
+        raise NotImplementedError
+
+    def _baseline_policy(self):
+        raise NotImplementedError
+
+    def _get_success(self):
+        return False
+
+    def _get_extra_info(self):
+        return {}
+
+    def _get_reward_terms(self, observations) -> np.array:
+        raise NotImplementedError
+
+    def close(self):
+        pass

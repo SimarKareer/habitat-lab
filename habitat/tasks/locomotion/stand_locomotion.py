@@ -22,6 +22,32 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
         self.robot.reset()
         self.robot.prone()
 
+    def _get_reward_terms(self, observations) -> np.array:
+        reward_terms = OrderedDict()
+
+        reward_terms["imitation_reward"] = (
+            -wrap_heading(
+                self.robot.joint_positions - self.target_joint_positions
+            )
+            ** 2
+            / self.num_joints
+        )
+
+        energy = self.robot.joint_torques * self.robot.joint_velocities
+        reward_terms["energy_reward"] = np.array([-np.abs(np.sum(energy, -1))])
+        self.named_rewards = reward_terms
+
+        # Log accumulated reward info
+        for k, v in reward_terms.items():
+            self.accumulated_reward_info["cumul_" + k] += np.sum(v)
+
+        # Return just the values
+        reward_terms = np.concatenate(list(reward_terms.values())).astype(
+            np.float32
+        )
+
+        return reward_terms
+
     def _baseline_policy(self):
         f"""Task-specific policy which produces actions that should maximize
         reward for debug purposes
@@ -74,34 +100,3 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
         )
 
         return img
-
-    def _get_reward_terms(self, observations) -> np.array:
-        reward_terms = OrderedDict()
-
-        reward_terms["imitation_reward"] = (
-            -wrap_heading(
-                self.robot.joint_positions - self.target_joint_positions
-            )
-            ** 2
-            / self.num_joints
-        )
-
-        reward_terms["energy_reward"] = np.array(
-            [
-                -np.abs(
-                    self.robot.joint_torques.dot(self.robot.joint_velocities)
-                )
-            ]
-        )
-        self.named_rewards = reward_terms
-
-        # Log accumulated reward info
-        for k, v in reward_terms.items():
-            self.accumulated_reward_info["cumul_" + k] += np.sum(v)
-
-        # Return just the values
-        reward_terms = np.concatenate(list(reward_terms.values())).astype(
-            np.float32
-        )
-
-        return reward_terms

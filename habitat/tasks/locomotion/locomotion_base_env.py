@@ -22,10 +22,14 @@ class ActionType:
 
 @baseline_registry.register_env(name="LocomotionRLEnv")
 class LocomotionRLEnv(habitat.RLEnv):
-    def __init__(self, config: Config, render=False, *args, **kwargs):
+    def __init__(
+        self, config: Config, render=False, num_robots=1, *args, **kwargs
+    ):
         self.config = config
         self.sim_config = config.TASK_CONFIG.SIMULATOR
         self.task_config = config.TASK_CONFIG
+        self.robot_config = config.TASK_CONFIG.ROBOT
+        self.num_robots = num_robots
 
         # Create action space
         self.num_joints = self.task_config.TASK.ACTION.NUM_JOINTS
@@ -66,6 +70,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         )
 
         # Create simulator
+        self.floor_ids = []
         self._sim = self._create_sim()
 
         # Place agent (for now, this is just a camera)
@@ -75,14 +80,8 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.video_dir = config.VIDEO_DIR
 
         # Load the robot into the sim
-        self.fixed_base = self.task_config.DEBUG.FIXED_BASE
-        ao_mgr = self._sim.get_articulated_object_manager()
-        robot_id = ao_mgr.add_articulated_object_from_urdf(
-            self.task_config.ROBOT.ROBOT_URDF, fixed_base=self.fixed_base
-        )
-        self.robot = AlienGo(
-            robot_id, self._sim, self.fixed_base, self.task_config.ROBOT
-        )
+        self.ao_mgr = self._sim.get_articulated_object_manager()
+        self._load_robots()
 
         # Initialize attributes
         self.render = render
@@ -121,10 +120,10 @@ class LocomotionRLEnv(habitat.RLEnv):
             self.robot.add_jms_pos(deltas)
         else:
             # Update current state
-            if self.action_type == "relative":
+            if self.action_type == ActionType.RELATIVE:
                 action_scale = self.max_rad_delta
                 offset = self.robot.joint_positions
-            elif self.action_type == "absolute":
+            elif self.action_type == ActionType.ABSOLUTE:
                 action_scale = self.robot.joint_limits_stand
                 offset = self.robot.standing_pose
             else:
@@ -133,7 +132,7 @@ class LocomotionRLEnv(habitat.RLEnv):
             scaled_actions = np.clip(deltas, -1.0, 1.0) * action_scale
             target_pose = scaled_actions + offset
 
-            # Remove jitter
+            # Remove jitter by maintaining current joint for too-close targets
             jitter_inds = (
                 abs(target_pose - self.robot.joint_positions)
                 < self.jitter_threshold
@@ -236,11 +235,28 @@ class LocomotionRLEnv(habitat.RLEnv):
         cube_template_cpy.friction_coefficient = 0.5
         obj_template_mgr.register_template(cube_template_cpy)
         rigid_obj_mgr = sim.get_rigid_object_manager()
-        ground_plane = rigid_obj_mgr.add_object_by_template_handle(cube_handle)
-        ground_plane.translation = [0.0, -0.2, 0.0]
-        ground_plane.motion_type = habitat_sim.physics.MotionType.KINEMATIC
+        floor_height = -0.2
+        for idx in range(self.num_robots):
+            self.floor_ids.append(
+                rigid_obj_mgr.add_object_by_template_handle(cube_handle)
+            )
+            self.floor_ids[idx].translation = [0.0, floor_height, 0.0]
+            self.floor_ids[
+                idx
+            ].motion_type = habitat_sim.physics.MotionType.KINEMATIC
+            if idx < self.num_robots - 1:
+                floor_height += self.task_config.SIMULATOR.FLOOR_SEPARATION
 
         return sim
+
+    def _load_robots(self):
+        self.fixed_base = self.task_config.DEBUG.FIXED_BASE
+        robot_id = self.ao_mgr.add_articulated_object_from_urdf(
+            self.task_config.ROBOT.ROBOT_URDF, fixed_base=self.fixed_base
+        )
+        self.robot = AlienGo(
+            robot_id, self._sim, self.fixed_base, self.task_config.ROBOT
+        )
 
     def seed(self, seed):
         torch.manual_seed(seed)

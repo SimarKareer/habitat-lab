@@ -1,7 +1,7 @@
 import numpy as np
 
 from habitat.tasks.locomotion.aliengo import (
-    AlienGo,
+    AlienGoBase,
     IterateAll,
     VectorCachableProperty,
 )
@@ -23,10 +23,9 @@ def iterate_all(attr):
     def wrapper(instance, *args, **kwargs):
         robot_inds = kwargs.get("robot_inds", None)
         attr_str = attr.attr_str
-        if len(args) > 0 and hasattr(args[0], "ndim") and args[0].ndim == 2:
-            iterate_arg = True
-        else:
-            iterate_arg = False
+        iterate_arg = (
+            len(args) > 0 and hasattr(args[0], "ndim") and args[0].ndim == 2
+        )
         for idx, robot in enumerate(instance.robots):
             if robot_inds is not None and idx not in robot_inds:
                 continue
@@ -47,20 +46,19 @@ def decorate_all_attributes(decorator1, decorator2):
             if method.startswith("__"):
                 continue
             # Identify VectorCachableProperty attributes
-            if isinstance(getattr(cls, method), VectorCachableProperty):
+            attr = getattr(cls, method)
+            if isinstance(attr, VectorCachableProperty):
                 # Apply input decorator to these attributes
-                setattr(
-                    cls, method, property(decorator1(getattr(cls, method)))
-                )
-            elif isinstance(getattr(cls, method), IterateAll):
-                setattr(cls, method, decorator2(getattr(cls, method)))
+                setattr(cls, method, property(decorator1(attr)))
+            elif isinstance(attr, IterateAll):
+                setattr(cls, method, decorator2(attr))
         return cls
 
     return decorate
 
 
 @decorate_all_attributes(vectorize_and_cache, iterate_all)
-class AlienGoVectorized(AlienGo):
+class AlienGoVectorized(AlienGoBase):
     cache = {}
 
     def __init__(
@@ -74,7 +72,7 @@ class AlienGoVectorized(AlienGo):
         # Call __init__ of super class just to initialize parameters
         super().__init__(None, sim, fixed_base, robot_cfg)
         self.robots = [
-            AlienGo(robot_id, sim, fixed_base, robot_cfg, reset_position)
+            AlienGoBase(robot_id, sim, fixed_base, robot_cfg, reset_position)
             for robot_id, reset_position in zip(robot_ids, reset_positions)
         ]
         self.robot_ids = robot_ids

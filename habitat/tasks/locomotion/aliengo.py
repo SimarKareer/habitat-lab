@@ -24,11 +24,10 @@ class IterateAll:
         self.attr_str = attribute_to_str(attr)
 
     def __call__(self, *args, **kwargs):
-        # return self.function
         self.function(*args, **kwargs)
 
 
-class AlienGo:
+class AlienGoBase:
     def __init__(
         self,
         robot_id,
@@ -252,3 +251,19 @@ class AlienGo:
         yaw_z = math.atan2(t3, t4)
 
         return roll_x, -yaw_z, pitch_y  # in radians
+
+
+def undecorate_iterate_all(cls):
+    # Go through the methods of the super class
+    for method in vars(cls.__base__):
+        # Identify IterateAll attributes
+        attr = getattr(cls, method)
+        if isinstance(attr, IterateAll):
+            # Set method of actual class to be stripped of IterateAll
+            setattr(cls, method, attr.function)
+    return cls
+
+
+@undecorate_iterate_all
+class AlienGo(AlienGoBase):
+    pass

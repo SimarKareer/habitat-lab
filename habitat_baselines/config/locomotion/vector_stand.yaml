@@ -1,7 +1,7 @@
 VERBOSE: False
-BASE_TASK_CONFIG_PATH: configs/tasks/locomotion_stand.yaml
-ENV_NAME: "LocomotionRLEnvStand"
-VECTOR_OF_VECTOR_ENVS: False
+BASE_TASK_CONFIG_PATH: configs/tasks/locomotion_vector_stand.yaml
+ENV_NAME: "LocomotionVectorRLEnvStand"
+VECTOR_OF_VECTOR_ENVS: True
 TRAINER_NAME: "ddppo"
 SIMULATOR_GPU_ID: 0
 TORCH_GPU_ID: 0

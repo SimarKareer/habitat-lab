@@ -14,7 +14,7 @@ class LocomotionVectorRLEnv(LocomotionRLEnv):
     is_vector_env = True
 
     def __init__(self, config, *args, **kwargs):
-        num_robots = config.NUM_ENVIRONMENTS
+        num_robots = config.NUM_SUB_ENVIRONMENTS
         self.robot_ids = []
         self.robot = None
         super().__init__(config, num_robots=num_robots, *args, **kwargs)

@@ -18,6 +18,16 @@ class VectorCachableProperty(property):
         self.cache_key = attribute_to_str(attribute)
 
 
+class IterateAll:
+    def __init__(self, attr):
+        self.function = attr
+        self.attr_str = attribute_to_str(attr)
+
+    def __call__(self, *args, **kwargs):
+        # return self.function
+        self.function(*args, **kwargs)
+
+
 class AlienGo:
     def __init__(
         self,
@@ -93,16 +103,7 @@ class AlienGo:
         return torques
 
     @VectorCachableProperty
-    def forward_velocity(self) -> float:
-        """local forward velocity"""
-        return self.local_velocity[..., 0]
-
-    @VectorCachableProperty
-    def side_velocity(self) -> float:
-        """local side_velocity"""
-        return self.local_velocity[..., 2]
-
-    def get_rpy(self):
+    def rpy(self):
         """Given a numpy quaternion we'll return the roll pitch yaw
 
         :return: rpy: tuple of roll, pitch yaw
@@ -120,12 +121,77 @@ class AlienGo:
         rpy = wrap_heading(np.array([roll, pitch, yaw]))
         return rpy
 
-    def get_rp(self):
-        return self.get_rpy()[:2]
+    @property
+    def rp(self):
+        return self.rpy[..., :2]
 
-    def set_joint_positions(self, pose):
-        """This is kinematic! Not dynamic."""
-        self.robot_id.joint_positions = wrap_heading(pose)
+    @property
+    def forward_velocity(self) -> float:
+        """local forward velocity"""
+        return self.local_velocity[..., 0]
+
+    @property
+    def side_velocity(self) -> float:
+        """local side_velocity"""
+        return self.local_velocity[..., 2]
+
+    @IterateAll
+    def set_pose_jms(self, pose, kinematic_snap=True, **kwargs):
+        """Sets a robot's pose and changes the jms to that pose (rests at
+        given position)
+        """
+        # Snap joints kinematically
+        if kinematic_snap:
+            self.robot_id.joint_positions = pose
+
+        # Make motor controllers maintain this position
+        for idx, p in enumerate(pose):
+            self.robot_id.update_joint_motor(idx, self._new_jms(p))
+
+    @IterateAll
+    def reset(self, yaw=0, **kwargs):
+        """Resets robot's movement, moves it back to center of platform"""
+        # Zero out the link and root velocities
+        self.robot_id.clear_joint_states()
+        self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
+        self.robot_id.root_linear_velocity = mn.Vector3(0.0, 0.0, 0.0)
+
+        # Roll robot 90 deg
+        base_transform = mn.Matrix4.rotation(
+            mn.Rad(np.deg2rad(-90)), mn.Vector3(1.0, 0.0, 0.0)
+        ) @ mn.Matrix4.rotation(
+            mn.Rad(np.deg2rad(yaw)), mn.Vector3(0.0, 0.0, 1.0)
+        )
+
+        # Position above center of platform; slightly higher if fixed_base
+        base_transform.translation = (
+            self.reset_position + mn.Vector3(0.0, 0.3, 0.0)
+            if self.fixed_base
+            else self.reset_position
+        )
+        self.robot_id.transformation = base_transform
+
+    @IterateAll
+    def add_jms_pos(self, joint_pos):
+        """Updates existing joint positions by adding each position in array of
+        joint_positions
+
+        :param joint_pos: array of delta joint positions
+        """
+        for i, new_pos in enumerate(joint_pos):
+            jms = self._jms_copy(self.robot_id.get_joint_motor_settings(i))
+            jms.position_target = np.clip(
+                wrap_heading(jms.position_target + new_pos),
+                self.joint_limits_lower[i],
+                self.joint_limits_upper[i],
+            )
+            self.robot_id.update_joint_motor(i, jms)
+
+    def prone(self, **kwargs):
+        self.set_pose_jms(np.array([0, 1.3, -2.5] * 4), **kwargs)
+
+    def stand(self, **kwargs):
+        self.set_pose_jms(self.standing_pose, **kwargs)
 
     def get_feet_contacts(self):
         """THIS ASSUMES THAT THERE IS ONLY ONE ROBOT IN THE SIM
@@ -164,71 +230,6 @@ class AlienGo:
             1.8,  # velocity_gain
             1.0,  # max_impulse
         )
-
-    def set_pose_jms(self, pose, kinematic_snap=True):
-        """Sets a robot's pose and changes the jms to that pose (rests at
-        given position)
-        """
-        # Snap joints kinematically
-        if kinematic_snap:
-            self.robot_id.joint_positions = pose
-
-        # Make motor controllers maintain this position
-        for idx, p in enumerate(pose):
-            self.robot_id.update_joint_motor(idx, self._new_jms(p))
-
-    def prone(self):
-        self.set_pose_jms(np.array([0, 1.3, -2.5] * 4))
-
-    def stand(self):
-        self.set_pose_jms(self.standing_pose)
-
-    def reset(self, yaw=0):
-        """Resets robot's movement, moves it back to center of platform"""
-        # Zero out the link and root velocities
-        self.robot_id.clear_joint_states()
-        self.robot_id.root_angular_velocity = mn.Vector3(0.0, 0.0, 0.0)
-        self.robot_id.root_linear_velocity = mn.Vector3(0.0, 0.0, 0.0)
-
-        # Roll robot 90 deg
-        base_transform = mn.Matrix4.rotation(
-            mn.Rad(np.deg2rad(-90)), mn.Vector3(1.0, 0.0, 0.0)
-        ) @ mn.Matrix4.rotation(
-            mn.Rad(np.deg2rad(yaw)), mn.Vector3(0.0, 0.0, 1.0)
-        )
-
-        # Position above center of platform; slightly higher if fixed_base
-        base_transform.translation = (
-            self.reset_position + mn.Vector3(0.0, 0.3, 0.0)
-            if self.fixed_base
-            else self.reset_position
-        )
-        self.robot_id.transformation = base_transform
-
-    def _set_joint_type_pos(self, joint_type, joint_pos):
-        """Sets all joints of a given type to a given position
-
-        :param joint_type: type of joint ie hip, thigh or calf
-        :param joint_pos: position to set these joints to
-        """
-        for idx, joint_name in enumerate(self.jmsIdxToJoint):
-            if joint_type in joint_name:
-                self.robot_id.update_joint_motor(idx, self._new_jms(joint_pos))
-
-    def add_jms_pos(self, joint_pos):
-        """Updates existing joint positions by adding each position in array of
-        joint_positions
-
-        :param joint_pos: array of delta joint positions
-        """
-        for i, new_pos in enumerate(joint_pos):
-            jms = self._jms_copy(self.robot_id.get_joint_motor_settings(i))
-            jms.position_target = np.clip(
-                wrap_heading(jms.position_target + new_pos),
-                self.joint_limits_lower[i],
-                self.joint_limits_upper[i],
-            )
-            self.robot_id.update_joint_motor(i, jms)
 
     @staticmethod
     def _euler_from_quaternion(x, y, z, w):

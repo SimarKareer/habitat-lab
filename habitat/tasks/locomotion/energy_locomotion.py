@@ -93,7 +93,7 @@ class LocomotionRLEnvEnergy(LocomotionRLEnv):
     def should_end(self):
         if not self.terminate_on_tilt:
             return False
-        roll, pitch = self.robot.get_rp()
+        roll, pitch = self.robot.rp
         return self.robot.height < 0.28 or abs(roll) > 0.4 or abs(pitch) > 0.2
 
     def add_force(self, fx, fy, fz, link=0):

@@ -22,6 +22,8 @@ class ActionType:
 
 @baseline_registry.register_env(name="LocomotionRLEnv")
 class LocomotionRLEnv(habitat.RLEnv):
+    is_vector_env = False
+
     def __init__(
         self, config: Config, render=False, num_robots=1, *args, **kwargs
     ):
@@ -108,7 +110,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         self.step_physics(self.settle_time)
 
         self.viz_buffer = []
-        self.num_steps = 0
+        self.num_steps *= 0  # Multiplication to support vector envs too
         self.accumulated_reward_info = defaultdict(float)
 
         return self._get_observations()
@@ -148,7 +150,8 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         # Get reward
         reward_terms = self._get_reward_terms(observations)
-        reward = sum(reward_terms)
+        reward = np.sum(reward_terms, -1)
+        self.accumulated_reward_info["cumul_reward"] += reward
 
         # Text on Screen
         if self.render:
@@ -159,6 +162,20 @@ class LocomotionRLEnv(habitat.RLEnv):
 
         # Check termination conditions
         self.num_steps += 1
+        done, info = self.get_done_info(reward_terms, step_render=False)
+
+        # Add info about how much of each reward component has been accumulated
+        for k, v in self.accumulated_reward_info.items():
+            if isinstance(v, np.ndarray):
+                # np.ndarray is stored by reference; MUST copy value over so
+                # subsequent zero-ing (if done) doesn't also zero value in info
+                info[k] = v.copy()
+            else:
+                info[k] = v
+
+        return observations, reward, done, info
+
+    def get_done_info(self, reward_terms, step_render=False):
         done = self.num_steps == self._max_episode_steps or self.should_end()
 
         # self.render needs to be on, but because of this self.should_end
@@ -183,10 +200,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         }
         info.update(self._get_extra_info())
 
-        # Add info about how much of each reward component has been accumulated
-        info.update(self.accumulated_reward_info)
-
-        return observations, reward, done, info
+        return done, info
 
     def _place_agent(self):
         """Places our camera agent in a spot it can see the robot"""
@@ -266,7 +280,7 @@ class LocomotionRLEnv(habitat.RLEnv):
         return {
             "joint_pos": self.robot.joint_positions,
             "joint_vel": self.robot.joint_velocities,
-            "euler_rot": self.robot.get_rp(),
+            "euler_rot": self.robot.rp,
             "feet_contact": self.robot.get_feet_contacts(),
         }
 

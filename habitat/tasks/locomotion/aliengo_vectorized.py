@@ -2,8 +2,8 @@ import numpy as np
 
 from habitat.tasks.locomotion.aliengo import (
     AlienGo,
+    IterateAll,
     VectorCachableProperty,
-    attribute_to_str,
 )
 
 
@@ -21,9 +21,21 @@ def vectorize_and_cache(attr):
 
 def iterate_all(attr):
     def wrapper(instance, *args, **kwargs):
-        attr_str = attribute_to_str(attr)
-        for robot in instance.robots:
-            getattr(robot, attr_str)(*args, **kwargs)
+        robot_inds = kwargs.get("robot_inds", None)
+        attr_str = attr.attr_str
+        if len(args) > 0 and hasattr(args[0], "ndim") and args[0].ndim == 2:
+            iterate_arg = True
+        else:
+            iterate_arg = False
+        for idx, robot in enumerate(instance.robots):
+            if robot_inds is not None and idx not in robot_inds:
+                continue
+            if iterate_arg:
+                getattr(robot, attr_str)(
+                    robot, args[0][idx], *args[1:], **kwargs
+                )
+            else:
+                getattr(robot, attr_str)(robot, *args, **kwargs)
 
     return wrapper
 
@@ -40,7 +52,7 @@ def decorate_all_attributes(decorator1, decorator2):
                 setattr(
                     cls, method, property(decorator1(getattr(cls, method)))
                 )
-            else:
+            elif isinstance(getattr(cls, method), IterateAll):
                 setattr(cls, method, decorator2(getattr(cls, method)))
         return cls
 
@@ -59,7 +71,7 @@ class AlienGoVectorized(AlienGo):
         robot_cfg,
         reset_positions,
     ):
-        # Call __init__ of super class to initialize parameters
+        # Call __init__ of super class just to initialize parameters
         super().__init__(None, sim, fixed_base, robot_cfg)
         self.robots = [
             AlienGo(robot_id, sim, fixed_base, robot_cfg, reset_position)
@@ -67,3 +79,6 @@ class AlienGoVectorized(AlienGo):
         ]
         self.robot_ids = robot_ids
         self.reset_positions = reset_positions
+
+    def clear_cache(self):
+        self.cache = {}

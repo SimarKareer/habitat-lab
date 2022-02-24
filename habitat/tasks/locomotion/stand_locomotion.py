@@ -9,10 +9,11 @@ from habitat.utils.geometry_utils import wrap_heading
 from habitat_baselines.common.baseline_registry import baseline_registry
 
 
-@baseline_registry.register_env(name="LocomotionRLEnvStand")
-class LocomotionRLEnvStand(LocomotionRLEnv):
-    def __init__(self, config: Config, render=False, *args, **kwargs):
-        super().__init__(config, render=render, args=args, kwargs=kwargs)
+class LocomotionStandMixin:
+    """When inheriting this Mixin, make sure that the RLEnv's init is called
+    before the init of this class"""
+
+    def __init__(self):
         # The following represents a standing pose:
         self.target_joint_positions = self.robot.standing_pose
         self.use_exp_mse = self.config.RL.use_exp_mse
@@ -33,16 +34,27 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
             / self.num_joints
         )
 
-        energy = self.robot.joint_torques * self.robot.joint_velocities
-        reward_terms["energy_reward"] = np.array([-np.abs(np.sum(energy, -1))])
+        # energy = self.robot.joint_torques * self.robot.joint_velocities
+        # reward_terms["energy_reward"] = -np.abs(np.sum(energy, -1))
         self.named_rewards = reward_terms
 
         # Log accumulated reward info
         for k, v in reward_terms.items():
-            self.accumulated_reward_info["cumul_" + k] += np.sum(v)
+            if self.is_vector_env and v.ndim == 1:
+                # Unsqueeze scalar reward terms
+                reward_terms[k] = np.expand_dims(v, axis=1)
+            self.accumulated_reward_info["cumul_" + k] += np.sum(
+                reward_terms[k], -1
+            )
 
         # Return just the values
-        reward_terms = np.concatenate(list(reward_terms.values())).astype(
+        reward_values = [
+            # Scalars are turned into 1-element vectors for concatenation
+            np.array([v], dtype=np.float32) if isinstance(v, float) else v
+            for v in reward_terms.values()
+        ]
+        axis = 1 if self.is_vector_env else 0
+        reward_terms = np.concatenate(reward_values, axis=axis).astype(
             np.float32
         )
 
@@ -52,25 +64,9 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
         f"""Task-specific policy which produces actions that should maximize
         reward for debug purposes
         """
-        print(
-            "Target: ",
-            self.target_joint_positions,
-            "Current: ",
-            self.robot.joint_positions,
-        )
-        deltas = []
-        for i, j in zip(
-            self.robot.joint_positions, self.target_joint_positions
-        ):
-            err = i - j
-            # Be more precise than necessary
-            if abs(err) > self.success_thresh / 3:
-                # Flip direction based on error
-                coeff = 1 if err < 0 else -1
-                deltas.append(coeff * min(self.max_rad_delta, abs(err)))
-            else:
-                deltas.append(0)
-        deltas = np.array(deltas, dtype=np.float32)
+        deltas = self.target_joint_positions - self.robot.joint_positions
+        deltas = np.clip(deltas, -self.max_rad_delta, self.max_rad_delta)
+        deltas[abs(deltas) < self.success_thresh / 3] = 0
         return deltas
 
     def _get_success(self):
@@ -100,3 +96,10 @@ class LocomotionRLEnvStand(LocomotionRLEnv):
         )
 
         return img
+
+
+@baseline_registry.register_env(name="LocomotionRLEnvStand")
+class LocomotionRLEnvStand(LocomotionStandMixin, LocomotionRLEnv):
+    def __init__(self, config: Config, render=False, *args, **kwargs):
+        LocomotionRLEnv.__init__(self, config, render=render, *args, **kwargs)
+        super().__init__()

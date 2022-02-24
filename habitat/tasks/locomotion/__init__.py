@@ -6,7 +6,7 @@
 
 
 def _try_register_locomotion_envs():
-    import habitat.tasks.locomotion.locomotion_base_env
     import habitat.tasks.locomotion.energy_locomotion
+    import habitat.tasks.locomotion.locomotion_base_env
     import habitat.tasks.locomotion.stand_locomotion
-
+    import habitat.tasks.locomotion.vector_stand_locomotion
